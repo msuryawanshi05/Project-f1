@@ -1,0 +1,410 @@
+{
+  "jolpica_mrdata_keys": [
+    "xmlns",
+    "series",
+    "url",
+    "limit",
+    "offset",
+    "total",
+    "RaceTable"
+  ],
+  "jolpica_race_keys": [
+    "season",
+    "round",
+    "url",
+    "raceName",
+    "Circuit",
+    "date",
+    "time",
+    "FirstPractice",
+    "SecondPractice",
+    "ThirdPractice",
+    "Qualifying"
+  ],
+  "jolpica_circuit_keys": [],
+  "jolpica_race_sample": {
+    "season": "2026",
+    "round": "1",
+    "url": "https://en.wikipedia.org/wiki/2026_Australian_Grand_Prix",
+    "raceName": "Australian Grand Prix",
+    "Circuit": {
+      "circuitId": "albert_park",
+      "url": "https://en.wikipedia.org/wiki/Albert_Park_Circuit",
+      "circuitName": "Albert Park Grand Prix Circuit",
+      "Location": {
+        "lat": "-37.8497",
+        "long": "144.968",
+        "locality": "Melbourne",
+        "country": "Australia"
+      }
+    },
+    "date": "2026-03-08"
+  },
+  "jolpica_driver_standing_keys": [
+    "position",
+    "positionText",
+    "points",
+    "wins",
+    "Driver",
+    "Constructors"
+  ],
+  "jolpica_driver_keys": [
+    "driverId",
+    "permanentNumber",
+    "code",
+    "url",
+    "givenName",
+    "familyName",
+    "dateOfBirth",
+    "nationality"
+  ],
+  "jolpica_constructor_in_standing_keys": [
+    "constructorId",
+    "url",
+    "name",
+    "nationality"
+  ],
+  "jolpica_constructor_standing_keys": [
+    "position",
+    "positionText",
+    "points",
+    "wins",
+    "Constructor"
+  ],
+  "jolpica_constructor_keys": [
+    "constructorId",
+    "url",
+    "name",
+    "nationality"
+  ],
+  "jolpica_result_keys": [
+    "number",
+    "position",
+    "positionText",
+    "points",
+    "Driver",
+    "Constructor",
+    "grid",
+    "laps",
+    "status",
+    "Time",
+    "FastestLap"
+  ],
+  "jolpica_result_driver_keys": [
+    "driverId",
+    "permanentNumber",
+    "code",
+    "url",
+    "givenName",
+    "familyName",
+    "dateOfBirth",
+    "nationality"
+  ],
+  "jolpica_result_constructor_keys": [
+    "constructorId",
+    "url",
+    "name",
+    "nationality"
+  ],
+  "jolpica_result_time_keys": [
+    "millis",
+    "time"
+  ],
+  "jolpica_result_fastestlap_keys": [
+    "rank",
+    "lap",
+    "Time"
+  ],
+  "jolpica_qualifying_keys": [
+    "number",
+    "position",
+    "Driver",
+    "Constructor",
+    "Q1",
+    "Q2",
+    "Q3"
+  ],
+  "jolpica_pitstop_keys": [],
+  "jolpica_pitstop_note": "May be empty if race not yet updated",
+  "jolpica_driver_profile_keys": [
+    "driverId",
+    "permanentNumber",
+    "code",
+    "url",
+    "givenName",
+    "familyName",
+    "dateOfBirth",
+    "nationality"
+  ],
+  "jolpica_circuit_profile_keys": [
+    "circuitId",
+    "url",
+    "circuitName",
+    "Location"
+  ],
+  "jolpica_circuit_location_keys": [
+    "lat",
+    "long",
+    "locality",
+    "country"
+  ],
+  "openf1_sessions_2026_count": 126,
+  "openf1_session_keys": [
+    "session_key",
+    "session_type",
+    "session_name",
+    "date_start",
+    "date_end",
+    "meeting_key",
+    "circuit_key",
+    "circuit_short_name",
+    "country_key",
+    "country_code",
+    "country_name",
+    "location",
+    "gmt_offset",
+    "year"
+  ],
+  "openf1_driver_keys": [
+    "meeting_key",
+    "session_key",
+    "driver_number",
+    "broadcast_name",
+    "full_name",
+    "name_acronym",
+    "team_name",
+    "team_colour",
+    "first_name",
+    "last_name",
+    "headshot_url",
+    "country_code"
+  ],
+  "openf1_driver_sample": {
+    "meeting_key": 1219,
+    "session_key": 9161,
+    "driver_number": 1,
+    "broadcast_name": "M VERSTAPPEN",
+    "full_name": "Max VERSTAPPEN",
+    "name_acronym": "VER",
+    "team_name": "Red Bull Racing",
+    "team_colour": "3671C6",
+    "first_name": "Max",
+    "last_name": "Verstappen",
+    "headshot_url": "https://www.formula1.com/content/dam/fom-website/drivers/M/MAXVER01_Max_Verstappen/maxver01.png.transform/1col/image.png",
+    "country_code": "NED"
+  },
+  "openf1_lap_keys": [
+    "meeting_key",
+    "session_key",
+    "driver_number",
+    "lap_number",
+    "date_start",
+    "duration_sector_1",
+    "duration_sector_2",
+    "duration_sector_3",
+    "i1_speed",
+    "i2_speed",
+    "is_pit_out_lap",
+    "lap_duration",
+    "segments_sector_1",
+    "segments_sector_2",
+    "segments_sector_3",
+    "st_speed"
+  ],
+  "openf1_lap_sample": {
+    "meeting_key": 1219,
+    "session_key": 9161,
+    "driver_number": 1,
+    "lap_number": 1,
+    "date_start": "2023-09-16T13:00:59.308000+00:00",
+    "duration_sector_1": null,
+    "duration_sector_2": 49.611,
+    "duration_sector_3": 42.252,
+    "i1_speed": 263,
+    "i2_speed": 255,
+    "is_pit_out_lap": true,
+    "lap_duration": null,
+    "segments_sector_1": [
+      2064,
+      2064,
+      2064,
+      2049,
+      2049,
+      2049,
+      2049,
+      2049
+    ],
+    "segments_sector_2": [
+      2049,
+      2049,
+      2049,
+      2049,
+      2049,
+      2049,
+      2049,
+      2049
+    ],
+    "segments_sector_3": [
+      2049,
+      2049,
+      2049,
+      2049,
+      2049,
+      2051,
+      2051,
+      2051
+    ],
+    "st_speed": null
+  },
+  "openf1_stint_keys": [
+    "meeting_key",
+    "session_key",
+    "stint_number",
+    "driver_number",
+    "lap_start",
+    "lap_end",
+    "compound",
+    "tyre_age_at_start"
+  ],
+  "openf1_stint_sample": {
+    "meeting_key": 1219,
+    "session_key": 9161,
+    "stint_number": 1,
+    "driver_number": 2,
+    "lap_start": 1,
+    "lap_end": 4,
+    "compound": "SOFT",
+    "tyre_age_at_start": 0
+  },
+  "openf1_pit_keys": [
+    "date",
+    "session_key",
+    "lap_number",
+    "meeting_key",
+    "driver_number",
+    "lane_duration",
+    "pit_duration",
+    "stop_duration"
+  ],
+  "openf1_pit_sample": {
+    "date": "2023-09-16T13:00:02.247000+00:00",
+    "session_key": 9161,
+    "lap_number": 1,
+    "meeting_key": 1219,
+    "driver_number": 2,
+    "lane_duration": null,
+    "pit_duration": null,
+    "stop_duration": null
+  },
+  "openf1_car_data_keys": [
+    "date",
+    "session_key",
+    "meeting_key",
+    "driver_number",
+    "speed",
+    "rpm",
+    "brake",
+    "throttle",
+    "drs",
+    "n_gear"
+  ],
+  "openf1_car_data_sample": {
+    "date": "2023-09-16T13:03:07.270000+00:00",
+    "session_key": 9161,
+    "meeting_key": 1219,
+    "driver_number": 1,
+    "speed": 300,
+    "rpm": 10644,
+    "brake": 0,
+    "throttle": 100,
+    "drs": 12,
+    "n_gear": 8
+  },
+  "openf1_race_control_keys": [
+    "meeting_key",
+    "session_key",
+    "date",
+    "driver_number",
+    "lap_number",
+    "category",
+    "flag",
+    "scope",
+    "sector",
+    "qualifying_phase",
+    "message"
+  ],
+  "openf1_race_control_sample": {
+    "meeting_key": 1219,
+    "session_key": 9161,
+    "date": "2023-09-16T12:45:18+00:00",
+    "driver_number": null,
+    "lap_number": null,
+    "category": "Other",
+    "flag": null,
+    "scope": null,
+    "sector": null,
+    "qualifying_phase": null,
+    "message": "RISK OF RAIN FOR F1 QUALIFYING SESSION IS 10%"
+  },
+  "openf1_weather_keys": [
+    "date",
+    "session_key",
+    "pressure",
+    "track_temperature",
+    "rainfall",
+    "wind_speed",
+    "meeting_key",
+    "wind_direction",
+    "humidity",
+    "air_temperature"
+  ],
+  "openf1_weather_sample": {
+    "date": "2023-09-16T12:45:18.528000+00:00",
+    "session_key": 9161,
+    "pressure": 1009.2,
+    "track_temperature": 34.8,
+    "rainfall": 0,
+    "wind_speed": 1.7,
+    "meeting_key": 1219,
+    "wind_direction": 193,
+    "humidity": 77.0,
+    "air_temperature": 29.6
+  },
+  "weather_top_keys": [
+    "latitude",
+    "longitude",
+    "generationtime_ms",
+    "utc_offset_seconds",
+    "timezone",
+    "timezone_abbreviation",
+    "elevation",
+    "hourly_units",
+    "hourly"
+  ],
+  "weather_hourly_keys": [
+    "time",
+    "temperature_2m",
+    "precipitation_probability",
+    "windspeed_10m"
+  ],
+  "weather_hourly_units": {
+    "time": "iso8601",
+    "temperature_2m": "\u00b0C",
+    "precipitation_probability": "%",
+    "windspeed_10m": "km/h"
+  },
+  "weather_forecast_hours": 168,
+  "weather_sample_temp_0": 27.2,
+  "weather_sample_precip_0": 8,
+  "weather_sample_wind_0": 17.3,
+  "wikipedia_top_keys": [
+    "error"
+  ],
+  "wikipedia_title": null,
+  "wikipedia_description": null,
+  "wikipedia_extract_sample": "",
+  "wikipedia_thumbnail_keys": [],
+  "wikipedia_thumbnail_url": null,
+  "wikipedia_coordinates": null,
+  "wikipedia_content_urls": []
+}

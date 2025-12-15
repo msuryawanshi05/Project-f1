@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+fastf1
+websockets
+apscheduler
+python-dotenv
+aiosqlite
+httpx
+signalrcore
