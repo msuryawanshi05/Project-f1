@@ -1,0 +1,36 @@
+{
+  "teamColours": {
+    "Red Bull Racing": "#3671C6",
+    "Ferrari": "#E8002D",
+    "Mercedes": "#27F4D2",
+    "McLaren": "#FF8000",
+    "Aston Martin": "#229971",
+    "Alpine": "#FF87BC",
+    "Williams": "#64C4FF",
+    "RB": "#6692FF",
+    "Haas F1 Team": "#B6BABD",
+    "Kick Sauber": "#52E252"
+  },
+  "driverTeams": {
+    "1": "Red Bull Racing",
+    "11": "Red Bull Racing",
+    "16": "Ferrari",
+    "44": "Ferrari",
+    "63": "Mercedes",
+    "72": "Mercedes",
+    "4": "McLaren",
+    "81": "McLaren",
+    "14": "Aston Martin",
+    "18": "Aston Martin",
+    "10": "Alpine",
+    "7": "Alpine",
+    "23": "Williams",
+    "55": "Williams",
+    "22": "RB",
+    "30": "RB",
+    "87": "Haas F1 Team",
+    "31": "Haas F1 Team",
+    "5": "Kick Sauber",
+    "27": "Kick Sauber"
+  }
+}

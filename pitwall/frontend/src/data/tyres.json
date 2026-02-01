@@ -1,0 +1,9 @@
+{
+  "2026": {
+    "1":  { "round": 1,  "circuit": "Albert Park",             "compounds": ["soft", "medium", "hard"] },
+    "2":  { "round": 2,  "circuit": "Shanghai",                "compounds": ["soft", "medium", "hard"] },
+    "3":  { "round": 3,  "circuit": "Suzuka",                  "compounds": ["soft", "medium", "hard"] },
+    "4":  { "round": 4,  "circuit": "Bahrain International",   "compounds": ["soft", "medium", "hard"] },
+    "5":  { "round": 5,  "circuit": "Jeddah Corniche",         "compounds": ["soft", "medium", "hard"] }
+  }
+}
