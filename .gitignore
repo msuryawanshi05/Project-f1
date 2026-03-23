@@ -28,3 +28,9 @@ Thumbs.db
 .idea/
 *.suo
 *.user
+GSD-STYLE.md
+model_capabilities.yaml
+PROJECT_RULES.md
+walkthrough.md
+.agent/
+.gsd/
