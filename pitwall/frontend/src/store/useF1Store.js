@@ -39,6 +39,14 @@ const useF1Store = create((set, get) => ({
   raceControl: [],    // last 50 race control messages
   carData: {},        // { [driverNumber]: { speed, rpm, gear, throttle, brake, drs } }
 
+  // ── Strategy chart gap history ──────────────────────────────────────────────
+  gapHistory: [],     // [{ lap, gap_<number>: seconds, ... }] — last 100 laps
+  // ── Telemetry driver selection ──────────────────────────────────────────────
+  selectedTelemetryDriver: null,
+  compareTelemetryDriver: null,
+  // ── Radio playback ──────────────────────────────────────────────────────────
+  playingRadioId: null,
+
   // ── Notification queue (for Phase 7 popup system) ──────────────────────────
   notifications: [],
 
@@ -46,6 +54,7 @@ const useF1Store = create((set, get) => ({
   settings: loadSettings(),
 
   // ── REST API data (Jolpica + OpenF1) ───────────────────────────────────────
+  calendarLoading: true,   // true until setCalendar() is called
   calendar: [],
   standings: {
     drivers: [],
@@ -79,7 +88,24 @@ const useF1Store = create((set, get) => ({
 
   addNotification: (notification) =>
     set((state) => ({
-      notifications: [notification, ...state.notifications].slice(0, 10),
+      notifications: [
+        {
+          id: Date.now(),
+          type: notification.type,                  // "critical"|"high"|"medium"|"info"
+          event: notification.event,                // "safety_car"|"penalty"|"pit"|"fastest_lap" etc
+          title: notification.title,
+          message: notification.message,
+          driverNumber: notification.driverNumber ?? null,
+          timestamp: new Date().toISOString(),
+          dismissed: false,
+        },
+        ...state.notifications.slice(0, 9),         // keep max 10
+      ],
+    })),
+
+  dismissNotification: (id) =>
+    set((state) => ({
+      notifications: state.notifications.filter((n) => n.id !== id),
     })),
 
   updateSettings: (partial) => {
@@ -90,7 +116,7 @@ const useF1Store = create((set, get) => ({
     set({ settings: next })
   },
 
-  setCalendar: (calendar) => set({ calendar }),
+  setCalendar: (calendar) => set({ calendar, calendarLoading: false }),
 
   setStandings: (drivers, constructors) =>
     set({ standings: { drivers, constructors } }),
@@ -99,6 +125,40 @@ const useF1Store = create((set, get) => ({
     set((state) => ({
       results: { ...state.results, [round]: data },
     })),
+
+  // ── Phase 5c: Gap history accumulation ─────────────────────────────────────
+  updateGapHistory: (timingArr, currentLap) =>
+    set((state) => {
+      if (!currentLap) return {}
+      const entry = { lap: currentLap }
+      timingArr.forEach((d) => {
+        const num = d.driver_number ?? d.number
+        if (!num) return
+        const parsed = parseGapRaw(d.gap_to_leader ?? d.gap)
+        if (parsed !== null) entry[`gap_${num}`] = parsed
+      })
+      const next = [...state.gapHistory, entry]
+      return { gapHistory: next.slice(-100) }
+    }),
+
+  // ── Phase 5c: Telemetry driver selection ────────────────────────────────────
+  setSelectedTelemetryDriver: (driverNumber) =>
+    set({ selectedTelemetryDriver: driverNumber }),
+
+  setCompareTelemetryDriver: (driverNumber) =>
+    set({ compareTelemetryDriver: driverNumber }),
+
+  // ── Phase 5c: Radio playback ────────────────────────────────────────────────
+  setPlayingRadioId: (id) => set({ playingRadioId: id }),
 }))
+
+// Private helper — avoids importing driverUtils into the store
+function parseGapRaw(gap) {
+  if (!gap || gap === 'LEADER') return 0
+  const s = String(gap).replace('+', '').trim()
+  if (s.includes('LAP')) return null
+  const num = Number.parseFloat(s)
+  return Number.isNaN(num) ? null : num
+}
 
 export default useF1Store

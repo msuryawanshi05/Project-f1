@@ -1,3 +1,127 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap');
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #0A0A0A;
+  color: #E5E5E5;
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* ── Typography helpers ──────────────────────────────────────── */
+.timing-number {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.display-font {
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+}
+
+/* ── Sector colours ──────────────────────────────────────────── */
+.sector-purple { color: #B468FF; }
+.sector-green  { color: #00D2BE; }
+.sector-yellow { color: #FFF200; }
+.sector-white  { color: #FFFFFF; }
+
+/* ── Team colour left bar on driver rows ──────────────────────── */
+.team-bar {
+  width: 3px;
+  flex-shrink: 0;
+  border-radius: 1px;
+}
+
+/* ── Deleted lap time ─────────────────────────────────────────── */
+.lap-deleted {
+  text-decoration: line-through;
+  opacity: 0.4;
+}
+
+/* ── Scrolling ticker ─────────────────────────────────────────── */
+@keyframes ticker-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.ticker-track {
+  display: flex;
+  white-space: nowrap;
+  animation: ticker-scroll 40s linear infinite;
+}
+
+/* ── LED pulse dot ────────────────────────────────────────────── */
+@keyframes led-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px currentColor; }
+  50%       { opacity: 0.4; box-shadow: none; }
+}
+.led-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  animation: led-pulse 2s ease-in-out infinite;
+}
+.led-dot.green  { background: #00A651; color: #00A651; }
+.led-dot.red    { background: #E8002D; color: #E8002D; }
+.led-dot.yellow { background: #FFF200; color: #FFF200; }
+.led-dot.dim    { background: #444444; color: #444444; animation: none; }
+
+/* ── Countdown digits ─────────────────────────────────────────── */
+.countdown-unit {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 2.5rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: #E5E5E5;
+}
+.countdown-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: #444444;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+/* ── Hover row highlight ──────────────────────────────────────── */
+.driver-row:hover {
+  background-color: #161616 !important;
+}
+
+/* ── Points bar ───────────────────────────────────────────────── */
+.points-bar-fill {
+  height: 2px;
+  border-radius: 1px;
+  transition: width 0.6s ease;
+}
+
+/* ── Custom scrollbar ─────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: #0A0A0A; }
+::-webkit-scrollbar-thumb  { background: #222222; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #333333; }
+
+/* ── Track status banner ──────────────────────────────────────── */
+.status-banner-green   { background: #00A651; color: #000; }
+.status-banner-yellow  { background: #FFF200; color: #000; }
+.status-banner-red     { background: #E8002D; color: #fff; }
+.status-banner-orange  { background: #FFA500; color: #000; }
+
+/* ── Recharts overrides ───────────────────────────────────────── */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #1a1a1a;
+}
+.recharts-text, .recharts-legend-item-text {
+  fill: #888888 !important;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
