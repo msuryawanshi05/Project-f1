@@ -106,3 +106,31 @@ export function getQualiPhase(sessionName, timing) {
 
   return { phase, eliminated }
 }
+
+/**
+ * Parse gap string (e.g. "+2.341", "LEADER", "+1 LAP") to seconds.
+ * Returns 0 for leader, null for LAP gaps (not plottable on a seconds chart).
+ */
+export function parseGapToSeconds(gap) {
+  if (!gap || gap === 'LEADER') return 0
+  const s = String(gap).replace('+', '').trim()
+  if (s.includes('LAP')) return null
+  const num = parseFloat(s)
+  return isNaN(num) ? null : num
+}
+
+/**
+ * Format pit stop duration seconds as "22.847s".
+ */
+export function formatPitDuration(seconds) {
+  if (seconds == null) return '---.---s'
+  return `${Number(seconds).toFixed(3)}s`
+}
+
+/**
+ * Convert wind direction degrees to 8-point compass label.
+ */
+export function degreesToCompass(deg) {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+  return dirs[Math.round((deg ?? 0) / 45) % 8]
+}
