@@ -1,8 +1,10 @@
+import { memo } from 'react'
+
 /**
  * SectorTime — single sector time with colour class
  * Props: seconds (number|null), colourClass ("purple"|"green"|"yellow"|"white")
  */
-export default function SectorTime({ seconds, colourClass = 'white' }) {
+const SectorTime = memo(function SectorTime({ seconds, colourClass = 'white' }) {
   const display = seconds == null || isNaN(seconds)
     ? '--.---'
     : Number(seconds).toFixed(3)
@@ -14,4 +16,6 @@ export default function SectorTime({ seconds, colourClass = 'white' }) {
       {display}
     </span>
   )
-}
+})
+
+export default SectorTime

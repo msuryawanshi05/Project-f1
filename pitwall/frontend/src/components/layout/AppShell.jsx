@@ -1,7 +1,10 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import useF1Store from '../../store/useF1Store'
 import { getTrackStatus } from '../../utils/driverUtils'
+import NotificationStack from '../ui/NotificationStack'
+import useNotificationTriggers from '../../hooks/useNotificationTriggers'
+import DataMonitor from '../dev/DataMonitor'
 
 const NAV = [
   { to: '/',           label: 'HOME'      },
@@ -43,7 +46,9 @@ export default function AppShell({ children, wsConnected }) {
   const session     = useF1Store((s) => s.session)
   const trackStatus = useF1Store((s) => s.trackStatus)
   const calendar    = useF1Store((s) => s.calendar)
-  const location    = useLocation()
+
+  // Mount notification trigger watchers
+  useNotificationTriggers()
 
   const isLive  = session.phase === 'LIVE' || session.phase === 'RACE'
   const ts      = getTrackStatus(trackStatus.status)
@@ -132,6 +137,12 @@ export default function AppShell({ children, wsConnected }) {
       <main className="flex-1 mt-[84px] mb-7 overflow-auto">
         {children}
       </main>
+
+      {/* ── Notification stack — top right ───────────── */}
+      <NotificationStack />
+
+      {/* ── Dev data monitor (DEV only) ──────────────── */}
+      {import.meta.env.DEV && <DataMonitor />}
     </div>
   )
 }
