@@ -1,3 +1,5 @@
+import { memo } from 'react'
+
 const COMPOUND_CONFIG = {
   SOFT:   { bg: '#E8002D', text: '#fff', letter: 'S' },
   MEDIUM: { bg: '#FFF200', text: '#000', letter: 'M' },
@@ -10,7 +12,7 @@ const COMPOUND_CONFIG = {
  * TyreIcon — compound coloured circle with letter + age below
  * Props: compound ("SOFT"|"MEDIUM"|...), age (laps as number)
  */
-export default function TyreIcon({ compound, age }) {
+const TyreIcon = memo(function TyreIcon({ compound, age }) {
   const cfg = COMPOUND_CONFIG[compound?.toUpperCase()] ?? { bg: '#444', text: '#fff', letter: '?' }
 
   return (
@@ -29,4 +31,6 @@ export default function TyreIcon({ compound, age }) {
       )}
     </div>
   )
-}
+})
+
+export default TyreIcon

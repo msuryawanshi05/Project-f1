@@ -374,7 +374,27 @@ class PitwallSignalRClient:
         logger.warning("SignalR connection closed")
 
     def _run(self) -> None:
-        """Blocking: negotiate, connect, subscribe, supervise."""
+        """Blocking: negotiate, connect, subscribe, supervise. Retries on failure."""
+        MAX_RETRIES  = 5
+        RETRY_DELAY  = 10  # seconds between attempts
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            if not self._running:
+                break
+            logger.info(f"SignalR connection attempt {attempt}/{MAX_RETRIES}")
+            success = self._attempt_connect()
+            if success:
+                return
+            if attempt < MAX_RETRIES:
+                logger.warning(
+                    f"SignalR attempt {attempt} failed — retrying in {RETRY_DELAY}s"
+                )
+                time.sleep(RETRY_DELAY)
+
+        logger.error("SignalR: max retries reached — giving up")
+
+    def _attempt_connect(self) -> bool:
+        """Single connection attempt. Returns True if session ran successfully."""
         try:
             # Pre-negotiate to get AWSALBCORS cookie (required by F1's AWS WAF)
             logger.info("Pre-negotiating AWSALBCORS cookie...")
@@ -409,7 +429,7 @@ class PitwallSignalRClient:
 
             if not self._connected:
                 logger.error("SignalR connection timeout — check network or F1 season status")
-                return
+                return False
 
             # Subscribe to all topics
             logger.info(f"Subscribing to {len(TOPICS)} topics...")
@@ -419,15 +439,18 @@ class PitwallSignalRClient:
             while self._running and self._connected:
                 time.sleep(1)
 
+            return True
+
         except Exception:
-            logger.exception("SignalR client thread error")
+            logger.exception("SignalR connection attempt error")
+            return False
         finally:
             try:
                 if self._connection:
                     self._connection.stop()
             except Exception:
                 pass
-            logger.info("SignalR thread exiting")
+            logger.info("SignalR attempt cleanup done")
 
 
 # ── Module-level singleton ────────────────────────────────────────────────────

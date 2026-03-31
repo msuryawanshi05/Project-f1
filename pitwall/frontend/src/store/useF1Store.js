@@ -46,6 +46,10 @@ const useF1Store = create((set, get) => ({
   compareTelemetryDriver: null,
   // ── Radio playback ──────────────────────────────────────────────────────────
   playingRadioId: null,
+  // ── Phase 6: Session key (from OpenF1) ──────────────────────────────────────
+  currentSessionKey: null,
+  // ── Phase 6: Per-driver best lap times (for qualifying mode) ────────────────
+  bestLaps: {},       // { [driverNumber]: bestLapSeconds }
 
   // ── Notification queue (for Phase 7 popup system) ──────────────────────────
   notifications: [],
@@ -150,6 +154,21 @@ const useF1Store = create((set, get) => ({
 
   // ── Phase 5c: Radio playback ────────────────────────────────────────────────
   setPlayingRadioId: (id) => set({ playingRadioId: id }),
+
+  // ── Phase 6: Session key ────────────────────────────────────────────────────
+  setCurrentSessionKey: (key) => set({ currentSessionKey: key }),
+
+  // ── Phase 6: Best lap accumulation (qualifying mode) ────────────────────────
+  updateBestLap: (driverNumber, lapSeconds) =>
+    set((state) => ({
+      bestLaps: {
+        ...state.bestLaps,
+        [driverNumber]: Math.min(
+          state.bestLaps[driverNumber] ?? Infinity,
+          lapSeconds
+        ),
+      },
+    })),
 }))
 
 // Private helper — avoids importing driverUtils into the store

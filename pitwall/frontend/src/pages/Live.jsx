@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+
 import useF1Store from '../store/useF1Store'
 import DriverRow from '../components/ui/DriverRow'
 import TrackStatusBanner from '../components/ui/TrackStatusBanner'
@@ -39,12 +40,15 @@ export default function Live() {
 
   const isLive = ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
 
-  // Sort timing by position
-  const sortedTiming = [...timing].sort((a, b) => {
-    const pa = parseInt(a.position ?? 99)
-    const pb = parseInt(b.position ?? 99)
-    return pa - pb
-  })
+  // Sort timing by position — memoised so 60fps weather updates don't re-sort
+  const sortedTiming = useMemo(() =>
+    [...timing].sort((a, b) => {
+      const pa = parseInt(a.position ?? 99, 10)
+      const pb = parseInt(b.position ?? 99, 10)
+      return pa - pb
+    }),
+    [timing]
+  )
 
   // For Q mode — elimination zones
   const sessionName = session.name ?? ''

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
+
 import TyreIcon from './TyreIcon'
 import SectorTime from './SectorTime'
 import { formatLapTime, formatGap, getSegmentColour } from '../../utils/driverUtils'
@@ -29,12 +30,10 @@ function getFlagEmoji(nationality) {
  *   isFavourite – bool, glows team colour border
  *   rank        – overall position (1-based)
  */
-export default function DriverRow({ driver, timing, tyre, teamColour = '#444444', isFavourite = false }) {
+const DriverRow = memo(function DriverRow({ driver, timing, tyre, teamColour = '#444444', isFavourite = false }) {
   const [expanded, setExpanded] = useState(false)
 
   const code      = driver?.short_name ?? driver?.code ?? driver?.number ?? '???'
-  const name      = driver?.last_name ?? driver?.full_name ?? ''
-  const nat       = driver?.country_code ?? driver?.nationality ?? ''
   const flag      = getFlagEmoji(driver?.nationality ?? '')
   const pos       = timing?.position ?? driver?.position ?? '—'
   const gap       = formatGap(timing?.gap_to_leader ?? timing?.gap)
@@ -171,4 +170,6 @@ export default function DriverRow({ driver, timing, tyre, teamColour = '#444444'
       )}
     </div>
   )
-}
+})
+
+export default DriverRow

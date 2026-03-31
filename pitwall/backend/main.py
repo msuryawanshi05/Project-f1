@@ -3,6 +3,7 @@ main.py — PITWALL FastAPI backend.
 
 Endpoints:
   GET  /health                        — health check
+  GET  /api/current-session           — current OpenF1 session key
   WS   /ws                           — live timing WebSocket
   GET  /api/circuit-info/{article}    — Wikipedia circuit summary proxy
 
@@ -13,6 +14,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import date
 
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -90,7 +92,7 @@ async def lifespan(app: FastAPI):
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
-app = FastAPI(title="PITWALL Backend", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="PITWALL Backend", version="0.4.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -105,6 +107,59 @@ app.add_middleware(
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "clients": len(connected_clients)}
+
+
+@app.get("/api/current-session")
+async def current_session():
+    """
+    Resolve the current or most-recent OpenF1 session_key.
+
+    Fetches the sessions list for the current year, finds the session
+    whose date matches today (or the most recently started session),
+    and returns its session_key so the frontend can use it for
+    OpenF1 car_data and radio API calls.
+
+    Returns: { session_key, session_name, circuit, year }
+    """
+    today = date.today()
+    year  = today.year
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get(
+                f"https://api.openf1.org/v1/sessions",
+                params={"year": year},
+            )
+            resp.raise_for_status()
+            sessions = resp.json()
+        except Exception as exc:
+            logger.warning(f"OpenF1 session fetch failed: {exc}")
+            return {"session_key": None, "error": str(exc)}
+
+    if not sessions:
+        return {"session_key": None, "error": "no sessions found"}
+
+    # Find best match: prefer a session whose date_start <= today <= date_end
+    today_str = today.isoformat()
+    matched = None
+    for s in sessions:
+        start = (s.get("date_start") or "")[:10]
+        end   = (s.get("date_end")   or s.get("date_start") or "")[:10]
+        if start <= today_str <= end:
+            matched = s
+            break  # take the first matching (earliest on the day)
+
+    # Fall back to the most recent past session
+    if not matched:
+        past = [s for s in sessions if (s.get("date_start") or "")[:10] <= today_str]
+        matched = past[-1] if past else sessions[-1]
+
+    return {
+        "session_key":  matched.get("session_key"),
+        "session_name": matched.get("session_name"),
+        "circuit":      matched.get("circuit_short_name"),
+        "year":         matched.get("year"),
+    }
 
 
 @app.websocket("/ws")
@@ -130,12 +185,12 @@ async def websocket_endpoint(ws: WebSocket):
                          "total_laps": None, "clock": "", "phase": "PRE"},
             }))
 
-        # Keep connection alive — wait for client to close
+        # Keep connection alive — wait for client messages (pong etc.)
         while True:
             try:
                 await asyncio.wait_for(ws.receive_text(), timeout=30)
             except asyncio.TimeoutError:
-                # Send a ping to keep the connection alive
+                # Send a ping to check if client is still alive
                 await ws.send_text(json.dumps({"type": "ping"}))
 
     except WebSocketDisconnect:
