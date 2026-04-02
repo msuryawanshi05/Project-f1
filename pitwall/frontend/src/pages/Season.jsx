@@ -1,7 +1,5 @@
-import { useState } from 'react'
 import useF1Store from '../store/useF1Store'
 import circuits from '../data/circuits.json'
-import CircuitDetailPanel from '../components/season/CircuitDetailPanel'
 
 const FLAGS = {
   Japan: '🇯🇵', Australia: '🇦🇺', China: '🇨🇳', Bahrain: '🇧🇭',
@@ -12,18 +10,9 @@ const FLAGS = {
   Azerbaijan: '🇦🇿', Singapore: '🇸🇬', Qatar: '🇶🇦',
 }
 
-function matchCircuit(race) {
-  const rn = (race.raceName ?? '').toLowerCase().replace(' grand prix', '').trim()
-  return circuits.find((c) => {
-    const cn = (c.name ?? '').toLowerCase().replace(' grand prix', '').trim()
-    return cn.includes(rn) || rn.includes(cn)
-  })
-}
-
 export default function Season() {
   const calendar        = useF1Store((s) => s.calendar)
   const calendarLoading = useF1Store((s) => s.calendarLoading)
-  const [selectedRace, setSelectedRace] = useState(null)
 
   if (calendarLoading) {
     return (
@@ -35,14 +24,8 @@ export default function Season() {
 
   const now = new Date()
 
-  function selectRace(race) {
-    setSelectedRace((prev) => (prev?.round === race.round ? null : race))
-  }
-
-  const selectedCircuit = selectedRace ? matchCircuit(selectedRace) : null
-
   return (
-    <div className="min-h-full bg-pitwall-bg relative">
+    <div className="min-h-full bg-pitwall-bg">
       {/* Header */}
       <div className="border-b border-pitwall-border px-6 py-4">
         <h1 className="font-display font-bold text-3xl tracking-widest text-white uppercase">
@@ -53,33 +36,25 @@ export default function Season() {
         </div>
       </div>
 
-      {/* Race list — shrinks when panel is open */}
-      <div
-        className="divide-y divide-pitwall-border transition-all duration-300"
-        style={{ marginRight: selectedRace ? 480 : 0 }}
-      >
+      {/* Race list */}
+      <div className="divide-y divide-pitwall-border">
         {calendar.map((race) => {
-          const circuitData = matchCircuit(race)
-          const country     = race.Circuit?.Location?.country ?? ''
-          const flag        = FLAGS[country] ?? '🏁'
-          const isPast      = new Date(race.date) < now
-          const isNext      = !isPast && calendar.filter((r) => new Date(r.date) >= now)[0]?.round === race.round
-          const isSelected  = selectedRace?.round === race.round
+          const circuitData = circuits.find((c) =>
+            race.raceName?.toLowerCase().includes(c.name?.toLowerCase().replace(' grand prix', '').trim()) ||
+            c.name?.toLowerCase().includes(race.raceName?.toLowerCase().replace(' grand prix', '').trim())
+          )
+          const country = race.Circuit?.Location?.country ?? ''
+          const flag    = FLAGS[country] ?? '🏁'
+          const isPast  = new Date(race.date) < now
+          const isNext  = !isPast && calendar.filter((r) => new Date(r.date) >= now)[0]?.round === race.round
 
           return (
             <div
               key={race.round}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => e.key === 'Enter' && selectRace(race)}
-              onClick={() => selectRace(race)}
-              className={`flex items-center gap-4 px-6 py-3 transition-colors cursor-pointer select-none ${
-                isSelected     ? 'bg-[#141414]' :
-                isPast         ? 'opacity-50 hover:bg-pitwall-surface/30' :
-                isNext         ? 'bg-pitwall-surface hover:bg-pitwall-surface/80' :
-                                 'hover:bg-pitwall-surface/50'
+              className={`flex items-center gap-4 px-6 py-3 transition-colors hover:bg-pitwall-surface/50 ${
+                isPast ? 'opacity-50' : isNext ? 'bg-pitwall-surface' : ''
               }`}
-              style={isNext ? { borderLeft: '3px solid #E8002D' } : { borderLeft: `3px solid ${isSelected ? '#E8002D' : 'transparent'}` }}
+              style={isNext ? { borderLeft: '3px solid #E8002D' } : { borderLeft: '3px solid transparent' }}
             >
               {/* Round */}
               <div className="w-8 flex-shrink-0 font-mono text-xs text-pitwall-ghost text-right">
@@ -117,27 +92,15 @@ export default function Season() {
                   DONE
                 </div>
               )}
-              {isNext && !isSelected && (
+              {isNext && (
                 <div className="flex-shrink-0 font-mono text-[10px] text-status-red border border-status-red/40 px-1.5 py-0.5">
                   NEXT
                 </div>
-              )}
-              {isSelected && (
-                <div className="flex-shrink-0 font-mono text-[10px] text-[#E8002D]">›</div>
               )}
             </div>
           )
         })}
       </div>
-
-      {/* Circuit detail panel */}
-      {selectedRace && (
-        <CircuitDetailPanel
-          race={selectedRace}
-          circuitData={selectedCircuit}
-          onClose={() => setSelectedRace(null)}
-        />
-      )}
     </div>
   )
 }

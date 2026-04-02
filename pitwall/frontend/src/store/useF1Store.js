@@ -94,26 +94,17 @@ const useF1Store = create((set, get) => ({
     set((state) => ({
       notifications: [
         {
-          id: notification.id ?? Date.now(),        // allow caller to supply id for live updates
-          type: notification.type,
-          event: notification.event,
+          id: Date.now(),
+          type: notification.type,                  // "critical"|"high"|"medium"|"info"
+          event: notification.event,                // "safety_car"|"penalty"|"pit"|"fastest_lap" etc
           title: notification.title,
           message: notification.message,
-          live: notification.live ?? false,          // true = pit-stop live timer active
           driverNumber: notification.driverNumber ?? null,
           timestamp: new Date().toISOString(),
           dismissed: false,
         },
-        ...state.notifications.slice(0, 9),
+        ...state.notifications.slice(0, 9),         // keep max 10
       ],
-    })),
-
-  // Patch an existing notification (e.g. pit-stop exit updating live timer)
-  updateNotification: (id, updates) =>
-    set((state) => ({
-      notifications: state.notifications.map((n) =>
-        n.id === id ? { ...n, ...updates } : n
-      ),
     })),
 
   dismissNotification: (id) =>

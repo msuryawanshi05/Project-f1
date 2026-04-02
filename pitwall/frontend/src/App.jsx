@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useJolpica } from './hooks/useJolpica'
@@ -11,16 +10,10 @@ import Season from './pages/Season'
 import Standings from './pages/Standings'
 import Results from './pages/Results'
 import Settings from './pages/Settings'
-import { unlockAudio } from './utils/notificationSounds'
 
 function App() {
   const { connected } = useWebSocket()
-  useJolpica()
-
-  // Unlock AudioContext on first user interaction (browser autoplay policy)
-  useEffect(() => {
-    unlockAudio()
-  }, [])
+  useJolpica()  // mounts once, populates store — no return value needed here
 
   return (
     <ErrorBoundary>
@@ -40,4 +33,3 @@ function App() {
 }
 
 export default App
-
