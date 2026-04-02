@@ -15,13 +15,47 @@ const NAV = [
   { to: '/settings',   label: 'SETTINGS'  },
 ]
 
+/**
+ * getNextSessionInfo — finds the next upcoming session across all race rounds.
+ * Returns { label, targetDt, isToday, isTomorrow } or null if off-season.
+ */
+function getNextSessionInfo(calendar) {
+  const now = new Date()
+  const todayStr     = now.toISOString().slice(0, 10)
+  const tomorrowStr  = new Date(now.getTime() + 86400000).toISOString().slice(0, 10)
+
+  for (const race of calendar) {
+    // Build ordered session list for this round
+    const sessions = []
+    if (race.FirstPractice?.date)  sessions.push({ name: 'FP1',        date: race.FirstPractice.date,  time: race.FirstPractice.time })
+    if (race.SecondPractice?.date) sessions.push({ name: 'FP2',        date: race.SecondPractice.date, time: race.SecondPractice.time })
+    if (race.ThirdPractice?.date)  sessions.push({ name: 'FP3',        date: race.ThirdPractice.date,  time: race.ThirdPractice.time })
+    if (race.Sprint?.date)         sessions.push({ name: 'SPRINT',     date: race.Sprint.date,         time: race.Sprint.time })
+    if (race.Qualifying?.date)     sessions.push({ name: 'QUALIFYING', date: race.Qualifying.date,     time: race.Qualifying.time })
+    if (race.date)                 sessions.push({ name: 'RACE',       date: race.date,                time: race.time ?? '12:00:00Z' })
+
+    for (const s of sessions) {
+      const dt = new Date(`${s.date}T${s.time ?? '12:00:00Z'}`)
+      if (dt > now) {
+        return {
+          label:      `${race.raceName?.replace(' Grand Prix', ' GP') ?? ''} — ${s.name}`,
+          targetDt:   dt,
+          isToday:    s.date === todayStr,
+          isTomorrow: s.date === tomorrowStr,
+        }
+      }
+    }
+  }
+  return null
+}
+
 function Countdown({ targetDate }) {
   const [diff, setDiff] = useState(null)
 
   useEffect(() => {
     if (!targetDate) return
     const tick = () => {
-      const ms = new Date(targetDate) - new Date()
+      const ms = targetDate - Date.now()
       if (ms <= 0) { setDiff(null); return }
       const d = Math.floor(ms / 86400000)
       const h = Math.floor((ms % 86400000) / 3600000)
@@ -35,9 +69,16 @@ function Countdown({ targetDate }) {
   }, [targetDate])
 
   if (!diff) return null
+  if (diff.d > 0) {
+    return (
+      <span className="font-mono text-xs text-pitwall-dim tracking-wide">
+        {diff.d}D {String(diff.h).padStart(2, '0')}H {String(diff.m).padStart(2, '0')}M {String(diff.s).padStart(2, '0')}S
+      </span>
+    )
+  }
   return (
     <span className="font-mono text-xs text-pitwall-dim tracking-wide">
-      {diff.d}D {String(diff.h).padStart(2,'0')}H {String(diff.m).padStart(2,'0')}M {String(diff.s).padStart(2,'0')}S
+      {String(diff.h).padStart(2, '0')}H {String(diff.m).padStart(2, '0')}M {String(diff.s).padStart(2, '0')}S
     </span>
   )
 }
@@ -50,12 +91,11 @@ export default function AppShell({ children, wsConnected }) {
   // Mount notification trigger watchers
   useNotificationTriggers()
 
-  const isLive  = session.phase === 'LIVE' || session.phase === 'RACE'
+  const isLive  = ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
   const ts      = getTrackStatus(trackStatus.status)
 
-  // Find next race
-  const now = new Date()
-  const nextRace = calendar.find((r) => new Date(r.date) >= now) ?? null
+  // Session-aware next session info
+  const nextSession = getNextSessionInfo(calendar)
 
   // Track status badge colour
   const tsBadgeClass = ts.severity === 'red'
@@ -76,7 +116,7 @@ export default function AppShell({ children, wsConnected }) {
           </span>
         </div>
 
-        {/* Centre — session status OR next race countdown */}
+        {/* Centre — session status OR next session countdown */}
         <div className="flex-1 flex items-center justify-center gap-3">
           {isLive ? (
             <>
@@ -93,13 +133,29 @@ export default function AppShell({ children, wsConnected }) {
                 </span>
               )}
             </>
+          ) : nextSession ? (
+            <>
+              <span className="led-dot dim" />
+              {nextSession.isToday ? (
+                <span className="font-mono text-[10px] text-status-yellow border border-status-yellow/30 px-1.5 py-0.5 tracking-widest">
+                  TODAY
+                </span>
+              ) : nextSession.isTomorrow ? (
+                <span className="font-mono text-[10px] text-[#888] border border-[#333] px-1.5 py-0.5 tracking-widest">
+                  TOMORROW
+                </span>
+              ) : null}
+              <span className="font-display text-sm tracking-wider text-pitwall-dim uppercase">
+                {nextSession.label}
+              </span>
+              <Countdown targetDate={nextSession.targetDt} />
+            </>
           ) : (
             <>
               <span className="led-dot dim" />
               <span className="font-display text-sm tracking-wider text-pitwall-dim uppercase">
-                {nextRace ? nextRace.raceName : 'OFF SEASON'}
+                OFF SEASON
               </span>
-              {nextRace && <Countdown targetDate={nextRace.date} />}
             </>
           )}
         </div>
