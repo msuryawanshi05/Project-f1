@@ -48,7 +48,7 @@ export function useJolpica() {
 
         setStandings(driverStandings, ctorStandings)
 
-        console.log(
+        console.debug(
           `[Jolpica] Loaded: ${races.length} races, ` +
           `${driverStandings.length} drivers, ` +
           `${ctorStandings.length} constructors`

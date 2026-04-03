@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import useF1Store from '../store/useF1Store'
+import RaceStoryStack from '../components/results/RaceStoryStack'
 
 const BASE = 'https://api.jolpi.ca/ergast/f1/2026'
 
@@ -50,16 +51,18 @@ export default function Results() {
   const results    = useF1Store((s) => s.results)
   const setResults = useF1Store((s) => s.setResults)
 
-  const [selected, setSelected]   = useState(null)
-  const [loadingRound, setLoading] = useState(null)
-  const [error, setError]          = useState(null)
+  const [selected, setSelected]     = useState(null)
+  const [loadingRound, setLoading]  = useState(null)
+  const [error, setError]           = useState(null)
+  const [showStory, setShowStory]   = useState(false)
 
   const now = new Date()
   const pastRaces = calendar.filter((r) => new Date(r.date) < now)
 
   async function loadRound(round) {
-    if (selected === round) { setSelected(null); return }
+    if (selected === round) { setSelected(null); setShowStory(false); return }
     setSelected(round)
+    setShowStory(false)
     if (results[round]) return
     setLoading(round)
     setError(null)
@@ -90,7 +93,6 @@ export default function Results() {
 
       {/* Race selector */}
       <div className="border-b border-pitwall-border">
-        {/* Horizontal scroll of completed rounds */}
         <div className="flex gap-0 overflow-x-auto">
           {calendar.map((race) => {
             const isPast  = new Date(race.date) < now
@@ -146,6 +148,27 @@ export default function Results() {
             </div>
           </div>
 
+          {/* Race Story toggle */}
+          <div>
+            <button
+              onClick={() => setShowStory((v) => !v)}
+              className={`font-mono text-[11px] tracking-widest px-4 py-2 border transition-colors ${
+                showStory
+                  ? 'border-status-red text-status-red bg-status-red/10'
+                  : 'border-[#252525] text-[#555] hover:border-[#444] hover:text-[#888]'
+              }`}
+            >
+              {showStory ? '▲ HIDE RACE STORY' : '▼ SHOW RACE STORY'}
+            </button>
+            {showStory && (
+              <RaceStoryStack
+                raceData={selectedData}
+                sessionKey={null}   // Phase 8: wire OpenF1 session key lookup
+                onClose={() => setShowStory(false)}
+              />
+            )}
+          </div>
+
           {/* Full classification */}
           <div>
             <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase mb-2">
@@ -164,12 +187,12 @@ export default function Results() {
             </div>
 
             {(selectedData.Results ?? []).map((r, i) => {
-              const d        = r.Driver ?? {}
-              const team     = r.Constructor?.name ?? '—'
-              const col      = teamColour(team)
-              const isDNF    = !['Finished', '+1 Lap', '+2 Laps'].includes(r.status) && !r.status?.startsWith('+')
-              const hasFl    = r.FastestLap?.rank === '1'
-              const time     = r.Time?.time ?? (r.status?.startsWith('+') ? r.status : '—')
+              const d      = r.Driver ?? {}
+              const team   = r.Constructor?.name ?? '—'
+              const col    = teamColour(team)
+              const isDNF  = !['Finished', '+1 Lap', '+2 Laps'].includes(r.status) && !r.status?.startsWith('+')
+              const hasFl  = r.FastestLap?.rank === '1'
+              const time   = r.Time?.time ?? (r.status?.startsWith('+') ? r.status : '—')
               return (
                 <div
                   key={r.number}

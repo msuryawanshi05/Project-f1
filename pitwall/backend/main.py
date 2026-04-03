@@ -13,6 +13,7 @@ Architecture:
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import date
 
@@ -94,9 +95,12 @@ async def lifespan(app: FastAPI):
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="PITWALL Backend", version="0.4.0", lifespan=lifespan)
 
+_cors_env = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:4173")
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:4173"],
+    allow_origins=_cors_origins,
     allow_methods=["GET"],
     allow_headers=["*"],
 )

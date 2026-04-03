@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import useF1Store from '../store/useF1Store'
 
-const WS_URL              = 'ws://localhost:8000/ws'
-const API_BASE            = 'http://localhost:8000'
+const WS_URL              = import.meta.env.VITE_WS_URL  ?? 'ws://localhost:8000/ws'
+const API_BASE            = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const RECONNECT_DELAY_MS  = 3000
 
 // ── Never-delay message types (safety/meta) ──────────────────────────────────
@@ -120,7 +120,7 @@ export function useWebSocket() {
         const json = await res.json()
         if (json.session_key) {
           setCurrentSessionKey(json.session_key)
-          console.log('[WS] Current session key:', json.session_key)
+          console.debug('[WS] Current session key:', json.session_key)
         }
       }
     } catch (e) {
@@ -138,7 +138,7 @@ export function useWebSocket() {
     ws.onopen = () => {
       setConnected(true)
       connectedRef.current = true
-      console.log('[WS] Connected to', WS_URL)
+      console.debug('[WS] Connected to', WS_URL)
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = null
@@ -176,7 +176,7 @@ export function useWebSocket() {
     ws.onclose = () => {
       setConnected(false)
       connectedRef.current = false
-      console.log('[WS] Disconnected — reconnecting in', RECONNECT_DELAY_MS, 'ms')
+      console.debug('[WS] Disconnected — reconnecting in', RECONNECT_DELAY_MS, 'ms')
       reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS)
     }
 
@@ -197,7 +197,7 @@ export function useWebSocket() {
         document.visibilityState === 'visible' &&
         wsRef.current?.readyState !== WebSocket.OPEN
       ) {
-        console.log('[WS] Tab visible — reconnecting')
+        console.debug('[WS] Tab visible — reconnecting')
         if (reconnectTimerRef.current) {
           clearTimeout(reconnectTimerRef.current)
           reconnectTimerRef.current = null

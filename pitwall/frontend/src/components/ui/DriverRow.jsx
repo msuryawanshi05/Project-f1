@@ -170,6 +170,19 @@ const DriverRow = memo(function DriverRow({ driver, timing, tyre, teamColour = '
       )}
     </div>
   )
-})
+}, (prev, next) =>
+  prev.timing?.last_lap_time_in_s === next.timing?.last_lap_time_in_s &&
+  prev.timing?.position           === next.timing?.position           &&
+  prev.timing?.gap_to_leader      === next.timing?.gap_to_leader      &&
+  prev.timing?.pitting            === next.timing?.pitting            &&
+  prev.timing?.pit_count          === next.timing?.pit_count          &&
+  prev.timing?.s1_time_in_s       === next.timing?.s1_time_in_s       &&
+  prev.timing?.s2_time_in_s       === next.timing?.s2_time_in_s       &&
+  prev.timing?.s3_time_in_s       === next.timing?.s3_time_in_s       &&
+  prev.tyre?.compound             === next.tyre?.compound             &&
+  prev.tyre?.age                  === next.tyre?.age                  &&
+  prev.teamColour                 === next.teamColour                 &&
+  prev.isFavourite                === next.isFavourite
+)
 
 export default DriverRow
