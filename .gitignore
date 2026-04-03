@@ -29,11 +29,10 @@ Thumbs.db
 *.suo
 *.user
 
-# Agent / AI files
-GSD-STYLE.md
+# Agent / AI files / Tool configs
+/*.md
+!README.md
 model_capabilities.yaml
-PROJECT_RULES.md
-walkthrough.md
 .agent/
 .gsd/
 .gemini/
