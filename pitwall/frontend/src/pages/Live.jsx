@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 
 import useF1Store from '../store/useF1Store'
 import DriverRow from '../components/ui/DriverRow'
 import TrackStatusBanner from '../components/ui/TrackStatusBanner'
+import { EmptyState } from '../components/ui/EmptyState'
 import { getTeamColour } from '../utils/driverUtils'
 import StrategyTab from './live/StrategyTab'
 import TelemetryTab from './live/TelemetryTab'
@@ -42,9 +43,12 @@ function SkeletonDriverRow() {
 // ── Sub-tab labels ────────────────────────────────────────────────────────────
 const TABS = ['TOWER', 'STRATEGY', 'TELEMETRY', 'RADIO']
 
+
+
 // ── Live page ─────────────────────────────────────────────────────────────────
 export default function Live() {
   const [activeTab, setActiveTab] = useState('TOWER')
+  const [expandedDriver, setExpandedDriver] = useState(null)
 
   const session     = useF1Store((s) => s.session)
   const trackStatus = useF1Store((s) => s.trackStatus)
@@ -56,7 +60,7 @@ export default function Live() {
 
   const isLive = ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
 
-  // ── Memoised derived data — avoids O(n) finds on every 2s timing tick ───────
+  // ── Memoised derived data ─────────────────────────────────────────────────
   const sortedTiming = useMemo(() =>
     [...timing].sort((a, b) => {
       const pa = parseInt(a.position ?? 99, 10)
@@ -66,7 +70,6 @@ export default function Live() {
     [timing]
   )
 
-  // O(1) lookups — stable map references so DriverRow memo comparator holds
   const tyresByDriver = useMemo(
     () => Object.fromEntries(tyres.map((t) => [t.driver_number ?? t.number, t])),
     [tyres]
@@ -77,12 +80,55 @@ export default function Live() {
     [drivers]
   )
 
+  // Toggle single-row expansion (only one open at a time for layout stability)
+  const handleExpand = useCallback(
+    (driverNum) => setExpandedDriver((prev) => prev === driverNum ? null : driverNum),
+    []
+  )
+
   // Qualifying elimination zone helpers
   const sessionName = session.name ?? ''
   const isQ  = sessionName.toUpperCase().includes('QUALIFYING') || sessionName.includes('Q1')
   const isQ2 = sessionName.includes('Q2') || sessionName.includes('Q3')
   const isQ3 = sessionName.includes('Q3')
   const q1Cut = 15, q2Cut = 10
+
+  // ── Row renderer for VariableSizeList ────────────────────────────────────
+  const RowRenderer = useCallback(({ index, style }) => {
+    const t          = sortedTiming[index]
+    const driverNum  = t?.driver_number ?? t?.number
+    const driver     = driversByNumber[driverNum] ?? { number: driverNum }
+    const tyre       = tyresByDriver[driverNum]
+    const teamColour = getTeamColour(driverNum, drivers)
+    const isFav      = settings.favouriteDrivers?.includes(String(driverNum))
+
+    const showQ1Div = isQ  && !isQ2 && index === q1Cut - 1
+    const showQ2Div = isQ2 && !isQ3 && index === q2Cut - 1
+    const showQ3Div = isQ3 && index === 9
+
+    return (
+      <div style={style}>
+        <DriverRow
+          driver={driver}
+          timing={t}
+          tyre={tyre}
+          teamColour={teamColour}
+          isFavourite={isFav}
+          expanded={expandedDriver === driverNum}
+          onExpand={handleExpand}
+        />
+        {(showQ1Div || showQ2Div || showQ3Div) && (
+          <div className="flex items-center gap-2 px-4 py-1 bg-[#0a0a0a]">
+            <div className="flex-1 h-px bg-pitwall-border" />
+            <span className="font-mono text-[10px] text-pitwall-ghost tracking-widest">
+              {showQ3Div ? 'Q3 OUT' : showQ2Div ? 'Q2 OUT' : 'Q1 OUT'}
+            </span>
+            <div className="flex-1 h-px bg-pitwall-border" />
+          </div>
+        )}
+      </div>
+    )
+  }, [sortedTiming, driversByNumber, tyresByDriver, drivers, settings, expandedDriver, handleExpand, isQ, isQ2, isQ3])
 
   return (
     <div className="h-full flex flex-col bg-pitwall-bg">
@@ -152,47 +198,20 @@ export default function Live() {
             <div className="flex-1 overflow-y-auto">
               {sortedTiming.length === 0 ? (
                 isLive ? (
-                  Array.from({ length: 20 }).map((_, i) => <SkeletonDriverRow key={i} />)
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full py-16 text-center gap-3 text-pitwall-ghost">
-                    <span className="text-4xl">🏁</span>
-                    <p className="font-display text-base text-pitwall-dim">No session active</p>
-                    <p className="font-mono text-xs">PITWALL activates 5 minutes before the next session</p>
+                  <div>
+                    {Array.from({ length: 20 }).map((_, i) => <SkeletonDriverRow key={i} />)}
                   </div>
+                ) : (
+                  <EmptyState
+                    icon="🏁"
+                    title="No session active"
+                    message="PITWALL activates 5 minutes before the next session"
+                  />
                 )
               ) : (
-                sortedTiming.map((t, idx) => {
-                  const driverNum  = t.driver_number ?? t.number
-                  const driver     = driversByNumber[driverNum] ?? { number: driverNum }
-                  const tyre       = tyresByDriver[driverNum]
-                  const teamColour = getTeamColour(driverNum, drivers)
-                  const isFav      = settings.favouriteDrivers?.includes(String(driverNum))
-
-                  const showQ1Div = isQ  && !isQ2 && idx === q1Cut - 1
-                  const showQ2Div = isQ2 && !isQ3 && idx === q2Cut - 1
-                  const showQ3Div = isQ3 && idx === 9
-
-                  return (
-                    <div key={driverNum ?? idx}>
-                      <DriverRow
-                        driver={driver}
-                        timing={t}
-                        tyre={tyre}
-                        teamColour={teamColour}
-                        isFavourite={isFav}
-                      />
-                      {(showQ1Div || showQ2Div || showQ3Div) && (
-                        <div className="flex items-center gap-2 px-4 py-1 bg-[#0a0a0a]">
-                          <div className="flex-1 h-px bg-pitwall-border" />
-                          <span className="font-mono text-[10px] text-pitwall-ghost tracking-widest">
-                            {showQ3Div ? 'Q3 OUT' : showQ2Div ? 'Q2 OUT' : 'Q1 OUT'}
-                          </span>
-                          <div className="flex-1 h-px bg-pitwall-border" />
-                        </div>
-                      )}
-                    </div>
-                  )
-                })
+                sortedTiming.map((_, index) => (
+                  <RowRenderer key={sortedTiming[index]?.driver_number ?? sortedTiming[index]?.number ?? index} index={index} style={{}} />
+                ))
               )}
             </div>
           </div>

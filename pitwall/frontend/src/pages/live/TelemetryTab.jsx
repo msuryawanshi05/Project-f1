@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   ResponsiveContainer,
   AreaChart, Area,
@@ -86,6 +86,10 @@ export default function TelemetryTab() {
   const selColour = selDriverNum ? getTeamColour(selDriverNum, drivers) : '#888'
   const cmpColour = cmpDriverNum ? getTeamColour(cmpDriverNum, drivers) : '#555'
 
+  // Limit to last 500 data points for chart performance (~2 laps)
+  const selChartData = useMemo(() => selData.slice(-500), [selData])
+  const cmpChartData = useMemo(() => cmpData.slice(-500), [cmpData])
+
   function handleChipClick(num) {
     if (compareMode) {
       setCmp(num === cmpDriverNum ? null : num)
@@ -153,14 +157,14 @@ export default function TelemetryTab() {
           {/* SPEED */}
           <ChartSection label="SPEED" height={120}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={selData} margin={CHART_MARGIN}>
+              <AreaChart data={selChartData} margin={CHART_MARGIN}>
                 <CartesianGrid stroke="#111" vertical={false} />
                 <YAxis domain={[0, 380]} tickCount={4} tick={AXIS_TICK} width={28} />
                 <ReferenceLine y={300} stroke="#333" strokeDasharray="3 3" />
                 <Tooltip {...TOOLTIP_STYLE} formatter={(v) => [`${v} km/h`, 'Speed']} />
                 <Area dataKey="speed" stroke={selColour} fill={`${selColour}22`} dot={false} strokeWidth={1.5} isAnimationActive={false} />
-                {compareMode && cmpData.length > 0 && (
-                  <Area dataKey="speed" data={cmpData} stroke={cmpColour} fill="none" dot={false} strokeWidth={1.5} strokeDasharray="4 2" strokeOpacity={0.6} isAnimationActive={false} />
+                {compareMode && cmpChartData.length > 0 && (
+                  <Area dataKey="speed" data={cmpChartData} stroke={cmpColour} fill="none" dot={false} strokeWidth={1.5} strokeDasharray="4 2" strokeOpacity={0.6} isAnimationActive={false} />
                 )}
               </AreaChart>
             </ResponsiveContainer>
@@ -169,12 +173,12 @@ export default function TelemetryTab() {
           {/* THROTTLE */}
           <ChartSection label="THROT" height={80}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={selData} margin={CHART_MARGIN}>
+              <AreaChart data={selChartData} margin={CHART_MARGIN}>
                 <YAxis domain={[0, 100]} tickCount={3} tick={AXIS_TICK} width={28} />
                 <Tooltip {...TOOLTIP_STYLE} formatter={(v) => [`${v}%`, 'Throttle']} />
                 <Area dataKey="throttle" stroke="#00A651" fill="#00A65122" dot={false} strokeWidth={1.5} isAnimationActive={false} />
-                {compareMode && cmpData.length > 0 && (
-                  <Area dataKey="throttle" data={cmpData} stroke={cmpColour} fill="none" dot={false} strokeWidth={1.5} strokeDasharray="4 2" strokeOpacity={0.6} isAnimationActive={false} />
+                {compareMode && cmpChartData.length > 0 && (
+                  <Area dataKey="throttle" data={cmpChartData} stroke={cmpColour} fill="none" dot={false} strokeWidth={1.5} strokeDasharray="4 2" strokeOpacity={0.6} isAnimationActive={false} />
                 )}
               </AreaChart>
             </ResponsiveContainer>
@@ -183,7 +187,7 @@ export default function TelemetryTab() {
           {/* BRAKE (binary 0/100) */}
           <ChartSection label="BRAKE" height={60}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={selData} margin={CHART_MARGIN}>
+              <AreaChart data={selChartData} margin={CHART_MARGIN}>
                 <YAxis domain={[0, 100]} hide />
                 <Tooltip {...TOOLTIP_STYLE} formatter={(v) => [v === 100 ? 'ON' : 'OFF', 'Brake']} />
                 <Area dataKey="brake" stroke="#E8002D" fill="#E8002D44" dot={false} strokeWidth={1} isAnimationActive={false} />
@@ -194,12 +198,12 @@ export default function TelemetryTab() {
           {/* GEAR */}
           <ChartSection label="GEAR" height={70}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={selData} margin={CHART_MARGIN}>
+              <LineChart data={selChartData} margin={CHART_MARGIN}>
                 <YAxis domain={[1, 8]} tickCount={8} tick={AXIS_TICK} width={28} />
                 <Tooltip {...TOOLTIP_STYLE} formatter={(v) => [`Gear ${v}`, 'Gear']} />
                 <Line dataKey="n_gear" stroke="#888888" dot={false} strokeWidth={1} type="stepAfter" isAnimationActive={false} />
-                {compareMode && cmpData.length > 0 && (
-                  <Line dataKey="n_gear" data={cmpData} stroke={cmpColour} dot={false} strokeWidth={1} type="stepAfter" strokeDasharray="4 2" strokeOpacity={0.6} isAnimationActive={false} />
+                {compareMode && cmpChartData.length > 0 && (
+                  <Line dataKey="n_gear" data={cmpChartData} stroke={cmpColour} dot={false} strokeWidth={1} type="stepAfter" strokeDasharray="4 2" strokeOpacity={0.6} isAnimationActive={false} />
                 )}
               </LineChart>
             </ResponsiveContainer>

@@ -1,4 +1,4 @@
-import { useState, memo } from 'react'
+import { memo } from 'react'
 
 import TyreIcon from './TyreIcon'
 import SectorTime from './SectorTime'
@@ -28,10 +28,11 @@ function getFlagEmoji(nationality) {
  *   tyre        – tyre object (compound, age, is_new)
  *   teamColour  – hex string for left bar
  *   isFavourite – bool, glows team colour border
- *   rank        – overall position (1-based)
+ *   expanded    – controlled expanded state (from parent)
+ *   onExpand    – callback(driverNum) to toggle expansion in parent
  */
-const DriverRow = memo(function DriverRow({ driver, timing, tyre, teamColour = '#444444', isFavourite = false }) {
-  const [expanded, setExpanded] = useState(false)
+const DriverRow = memo(function DriverRow({ driver, timing, tyre, teamColour = '#444444', isFavourite = false, expanded = false, onExpand }) {
+  const driverNum = driver?.number ?? timing?.driver_number
 
   const code      = driver?.short_name ?? driver?.code ?? driver?.number ?? '???'
   const flag      = getFlagEmoji(driver?.nationality ?? '')
@@ -57,13 +58,12 @@ const DriverRow = memo(function DriverRow({ driver, timing, tyre, teamColour = '
 
   const rowBg = isPitting ? 'bg-[#1a1a1a]' : 'bg-pitwall-surface hover:bg-[#161616]'
   const favRing = isFavourite ? `ring-1 ring-inset` : ''
-  const favStyle = isFavourite ? { '--tw-ring-color': teamColour } : {}
 
   return (
     <div
       className={`driver-row group cursor-pointer transition-colors ${rowBg} ${favRing}`}
       style={isFavourite ? { boxShadow: `inset 2px 0 0 ${teamColour}` } : {}}
-      onClick={() => setExpanded((e) => !e)}
+      onClick={() => onExpand?.(driverNum)}
     >
       {/* ── Main row ─────────────────────────────────────────── */}
       <div className="flex items-center h-9 gap-0" style={{ borderBottom: '1px solid #1a1a1a' }}>
@@ -127,7 +127,8 @@ const DriverRow = memo(function DriverRow({ driver, timing, tyre, teamColour = '
         </div>
 
         {/* Expand chevron */}
-        <div className="ml-auto pr-2 text-pitwall-ghost text-xs group-hover:text-pitwall-dim transition-colors">
+        <div className="ml-auto pr-2 text-pitwall-ghost text-xs group-hover:text-pitwall-dim transition-colors"
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} driver details for ${code}`}>
           {expanded ? '▲' : '▼'}
         </div>
       </div>
@@ -182,7 +183,8 @@ const DriverRow = memo(function DriverRow({ driver, timing, tyre, teamColour = '
   prev.tyre?.compound             === next.tyre?.compound             &&
   prev.tyre?.age                  === next.tyre?.age                  &&
   prev.teamColour                 === next.teamColour                 &&
-  prev.isFavourite                === next.isFavourite
+  prev.isFavourite                === next.isFavourite                &&
+  prev.expanded                   === next.expanded
 )
 
 export default DriverRow
