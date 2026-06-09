@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import useF1Store from '../store/useF1Store'
+import useRaceWeekendState from '../hooks/useRaceWeekendState'
+import TrackMap from '../components/ui/TrackMap'
 import circuits from '../data/circuits.json'
 
 // ── Countdown hook ────────────────────────────────────────────────────────────
@@ -24,6 +27,17 @@ function useCountdown(targetDate) {
   return parts
 }
 
+// ── Country flags ─────────────────────────────────────────────────────────────
+const FLAGS = {
+  Japan: '🇯🇵', Australia: '🇦🇺', China: '🇨🇳', Bahrain: '🇧🇭',
+  'Saudi Arabia': '🇸🇦', 'United States': '🇺🇸', 'United Arab Emirates': '🇦🇪',
+  Brazil: '🇧🇷', Mexico: '🇲🇽', Italy: '🇮🇹', Spain: '🇪🇸',
+  Monaco: '🇲🇨', Canada: '🇨🇦', Austria: '🇦🇹', UK: '🇬🇧',
+  'United Kingdom': '🇬🇧', Belgium: '🇧🇪', Netherlands: '🇳🇱',
+  Hungary: '🇭🇺', Azerbaijan: '🇦🇿', Singapore: '🇸🇬',
+  Qatar: '🇶🇦', 'Las Vegas': '🇺🇸', UAE: '🇦🇪', USA: '🇺🇸',
+}
+
 // ── Podium card ───────────────────────────────────────────────────────────────
 function PodiumCard({ result, pos }) {
   if (!result) return <div className="flex-1 bg-[#111] border border-pitwall-border p-4 opacity-30">—</div>
@@ -34,7 +48,6 @@ function PodiumCard({ result, pos }) {
   const familyName = driver.familyName ?? ''
   const time       = result.Time?.time ?? result.status ?? '—'
 
-  // Map constructor to team colour
   const TEAM_COLOURS = {
     'Red Bull': '#3671C6', 'Ferrari': '#E8002D', 'Mercedes': '#27F4D2',
     'McLaren': '#FF8000', 'Aston Martin': '#229971', 'Alpine': '#FF87BC',
@@ -50,9 +63,7 @@ function PodiumCard({ result, pos }) {
       className={`flex-1 border border-pitwall-border p-4 flex flex-col gap-1 ${isWinner ? 'bg-[#141414]' : 'bg-pitwall-surface'}`}
       style={{ borderTop: `3px solid ${colour}` }}
     >
-      <div className="font-display text-pitwall-ghost text-xs tracking-widest">
-        P{pos}
-      </div>
+      <div className="font-display text-pitwall-ghost text-xs tracking-widest">P{pos}</div>
       <div className={`font-display font-bold tracking-wider text-white ${isWinner ? 'text-4xl' : 'text-2xl'}`}>
         {code}
       </div>
@@ -63,25 +74,13 @@ function PodiumCard({ result, pos }) {
   )
 }
 
-// ── Compact race card ─────────────────────────────────────────────────────────
+// ── Compact race card (upcoming list) ─────────────────────────────────────────
 function RaceCard({ race }) {
   const circuitData = circuits.find((c) =>
     c.name?.toLowerCase().includes(race.raceName?.toLowerCase().replace(' grand prix', '').trim()) ||
     race.raceName?.toLowerCase().includes(c.name?.toLowerCase().replace(' grand prix', '').trim())
   )
-  const countryFlag = race.Circuit?.Location?.country ?? ''
-
-  // Simple flag by country name
-  const FLAGS = {
-    Japan: '🇯🇵', Australia: '🇦🇺', China: '🇨🇳', Bahrain: '🇧🇭',
-    'Saudi Arabia': '🇸🇦', 'United States': '🇺🇸', 'United Arab Emirates': '🇦🇪',
-    Brazil: '🇧🇷', Mexico: '🇲🇽', Italy: '🇮🇹', Spain: '🇪🇸',
-    Monaco: '🇲🇨', Canada: '🇨🇦', Austria: '🇦🇹', UK: '🇬🇧',
-    'United Kingdom': '🇬🇧', Belgium: '🇧🇪', Netherlands: '🇳🇱',
-    Hungary: '🇭🇺', Azerbaijan: '🇦🇿', Singapore: '🇸🇬',
-    Qatar: '🇶🇦', 'Las Vegas': '🇺🇸',
-  }
-  const flag = FLAGS[countryFlag] ?? '🏁'
+  const flag = FLAGS[race.Circuit?.Location?.country] ?? '🏁'
 
   return (
     <div className="flex-1 min-w-0 bg-pitwall-surface border border-pitwall-border p-3 flex flex-col gap-1.5">
@@ -100,6 +99,33 @@ function RaceCard({ race }) {
   )
 }
 
+// ── Race weekend session schedule (compact) ───────────────────────────────────
+function WeekendSchedule({ weekendSessions }) {
+  if (!weekendSessions?.length) return null
+  return (
+    <div className="space-y-0.5">
+      {weekendSessions.map((s) => (
+        <div
+          key={s.key}
+          className={`flex items-center gap-3 py-1.5 px-3 border border-pitwall-border ${
+            s.live ? 'bg-status-green/10 border-status-green/30' : s.done ? 'opacity-40' : 'bg-pitwall-surface'
+          }`}
+        >
+          <span className={`font-mono text-[10px] ${s.done ? 'text-pitwall-ghost' : s.live ? 'text-status-green' : 'text-pitwall-dim'}`}>
+            {s.done ? '✓' : s.live ? '●' : '○'}
+          </span>
+          <span className={`font-mono text-xs flex-1 ${s.live ? 'text-status-green font-bold' : s.done ? 'text-pitwall-ghost' : 'text-pitwall-text'}`}>
+            {s.label}
+          </span>
+          <span className="font-mono text-[10px] text-pitwall-ghost">
+            {s.dt?.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Home page ─────────────────────────────────────────────────────────────────
 export default function Home() {
   const calendar        = useF1Store((s) => s.calendar)
@@ -107,66 +133,158 @@ export default function Home() {
   const standings       = useF1Store((s) => s.standings)
   const results         = useF1Store((s) => s.results)
 
-  const now      = new Date()
-  const pastRaces = calendar.filter((r) => new Date(r.date) < now)
-  const futureRaces = calendar.filter((r) => new Date(r.date) >= now)
-  const nextRace  = futureRaces[0] ?? null
-  const countdown = useCountdown(nextRace?.date)
+  const weekendState = useRaceWeekendState()
+  const { mode, currentRace, nextSession, weekendSessions, circuitData, lastSession } = weekendState
 
-  // Get last completed round's results if available
-  const lastRound = pastRaces[pastRaces.length - 1]
+  const isWeekend = mode === 'WEEKEND_BETWEEN_SESSIONS' || mode === 'WEEKEND_SESSION_SOON' || mode === 'WEEKEND_UPCOMING'
+  const isActiveWeekend = mode === 'WEEKEND_BETWEEN_SESSIONS' || mode === 'WEEKEND_SESSION_SOON'
+
+  const now         = new Date()
+  const pastRaces   = calendar.filter((r) => new Date(r.date) < now)
+  const futureRaces = calendar.filter((r) => new Date(r.date) >= now)
+  const nextRace    = currentRace ?? futureRaces[0] ?? null
+
+  // For countdown — use the FP1/first session date, not the race date
+  const countdownTarget = nextSession?.targetDt ?? (nextRace ? new Date(`${nextRace.date}T${nextRace.time ?? '13:00:00Z'}`) : null)
+  const countdown       = useCountdown(countdownTarget)
+
+  const lastRound  = pastRaces[pastRaces.length - 1]
   const lastResult = lastRound ? results[lastRound.round] : null
-  const podium = lastResult && !lastResult.empty
+  const podium     = lastResult && !lastResult.empty
     ? (lastResult.Results ?? []).slice(0, 3)
     : null
 
   const p1Driver = standings.drivers[0] ?? null
   const p2Driver = standings.drivers[1] ?? null
 
+  const countryFlag = nextRace?.Circuit?.Location?.country ?? ''
+  const heroFlag    = FLAGS[countryFlag] ?? '🏁'
+
   return (
     <div className="min-h-full bg-pitwall-bg">
 
       {/* ── Hero ──────────────────────────────────────────────────── */}
-      <section className="border-b border-pitwall-border px-8 py-10">
+      <section className="border-b border-pitwall-border px-8 py-8">
         {calendarLoading ? (
           <div className="font-mono text-pitwall-dim text-sm">Loading season data…</div>
+        ) : isActiveWeekend && currentRace ? (
+          /* ── RACE WEEKEND ACTIVE BANNER ─────────────────────────── */
+          <div className="flex flex-col lg:flex-row gap-8">
+            <div className="flex-1">
+              {/* Badge */}
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2 h-2 rounded-full bg-status-red animate-pulse" />
+                <span className="font-mono text-[10px] text-status-red tracking-widest uppercase border border-status-red/30 px-2 py-0.5">
+                  Race Weekend In Progress
+                </span>
+                {currentRace.Circuit?.Location?.country && (
+                  <span className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase border border-pitwall-border px-2 py-0.5">
+                    Round {currentRace.round}
+                  </span>
+                )}
+              </div>
+
+              <h1 className="font-display font-bold text-4xl text-white tracking-wide uppercase leading-none mb-2">
+                {heroFlag} {currentRace.raceName}
+              </h1>
+              <div className="font-display text-pitwall-dim text-base tracking-widest uppercase mb-4">
+                {currentRace.Circuit?.circuitName ?? circuitData?.circuit ?? ''}
+              </div>
+
+              {/* Last session done */}
+              {lastSession && (
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="font-mono text-[10px] text-status-green border border-status-green/30 px-2 py-0.5">
+                    ✓ {lastSession.label} COMPLETE
+                  </span>
+                </div>
+              )}
+
+              {/* Next session countdown */}
+              {nextSession && countdown && (
+                <div className="mt-4">
+                  <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase mb-2">
+                    Next — {nextSession.label}
+                  </div>
+                  <div className="flex items-end gap-3">
+                    {[
+                      { val: String(countdown.h).padStart(2, '0'), label: 'hrs' },
+                      { val: String(countdown.m).padStart(2, '0'), label: 'min' },
+                      { val: String(countdown.s).padStart(2, '0'), label: 'sec' },
+                    ].map(({ val, label }) => (
+                      <div key={label} className="flex flex-col items-center">
+                        <span className="countdown-unit">{val}</span>
+                        <span className="countdown-label">{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {nextSession && !countdown && (
+                <div className="font-display text-sm text-status-red tracking-widest uppercase animate-pulse mt-4">
+                  {nextSession.label} Starting Now
+                </div>
+              )}
+
+              <Link
+                to="/live"
+                className="inline-block mt-5 font-mono text-xs tracking-widest uppercase px-4 py-2 border border-pitwall-border text-pitwall-dim hover:text-white hover:border-status-red transition-colors"
+              >
+                Open Live Timing →
+              </Link>
+            </div>
+
+            {/* Track map side */}
+            {circuitData && (
+              <div className="lg:w-72 flex-shrink-0">
+                <TrackMap circuitData={circuitData} compact showStats />
+              </div>
+            )}
+          </div>
         ) : nextRace ? (
-          <div className="flex items-start justify-between gap-8">
-            {/* Left — race name */}
-            <div className="flex flex-col gap-2">
-              <div className="font-mono text-pitwall-ghost text-xs tracking-widest uppercase">
-                Next Race · Round {nextRace.round}
+          /* ── UPCOMING RACE HERO ─────────────────────────────────── */
+          <div className="flex flex-col lg:flex-row gap-8">
+            <div className="flex-1">
+              <div className="font-mono text-pitwall-ghost text-xs tracking-widest uppercase mb-2">
+                {mode === 'WEEKEND_UPCOMING' ? 'Race Weekend Starting Soon' : 'Next Race'} · Round {nextRace.round}
               </div>
               <h1 className="font-display font-bold text-5xl text-white tracking-wide uppercase leading-none">
-                {nextRace.raceName}
+                {heroFlag} {nextRace.raceName}
               </h1>
-              <div className="font-display text-pitwall-dim text-lg tracking-widest uppercase">
+              <div className="font-display text-pitwall-dim text-lg tracking-widest uppercase mt-2">
                 {nextRace.Circuit?.Location?.country ?? ''} · {nextRace.Circuit?.circuitName ?? ''}
               </div>
               <div className="font-mono text-sm text-pitwall-dim mt-1">
                 Race: {nextRace.date}
               </div>
+
+              {/* Countdown */}
+              {countdown && (
+                <div className="mt-5">
+                  <div className="font-mono text-pitwall-ghost text-xs tracking-widest uppercase mb-2">
+                    {nextSession ? `${nextSession.label} in` : 'Race in'}
+                  </div>
+                  <div className="flex items-end gap-3">
+                    {[
+                      { val: countdown.d, label: 'days' },
+                      { val: String(countdown.h).padStart(2, '0'), label: 'hrs' },
+                      { val: String(countdown.m).padStart(2, '0'), label: 'min' },
+                      { val: String(countdown.s).padStart(2, '00'), label: 'sec' },
+                    ].map(({ val, label }) => (
+                      <div key={label} className="flex flex-col items-center">
+                        <span className="countdown-unit">{val}</span>
+                        <span className="countdown-label">{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Right — countdown */}
-            {countdown && (
-              <div className="flex-shrink-0 flex flex-col items-end gap-3">
-                <div className="font-mono text-pitwall-ghost text-xs tracking-widest uppercase">
-                  Countdown
-                </div>
-                <div className="flex items-end gap-3">
-                  {[
-                    { val: countdown.d, label: 'days' },
-                    { val: String(countdown.h).padStart(2,'0'), label: 'hrs' },
-                    { val: String(countdown.m).padStart(2,'0'), label: 'min' },
-                    { val: String(countdown.s).padStart(2,'0'), label: 'sec' },
-                  ].map(({ val, label }) => (
-                    <div key={label} className="flex flex-col items-center">
-                      <span className="countdown-unit">{val}</span>
-                      <span className="countdown-label">{label}</span>
-                    </div>
-                  ))}
-                </div>
+            {/* Track map for upcoming race */}
+            {circuitData && (
+              <div className="lg:w-72 flex-shrink-0">
+                <TrackMap circuitData={circuitData} compact showStats />
               </div>
             )}
           </div>
@@ -175,9 +293,7 @@ export default function Home() {
             <h1 className="font-display font-bold text-5xl text-white tracking-wide uppercase">
               2026 F1 World Championship
             </h1>
-            <div className="font-mono text-pitwall-dim text-sm mt-2">
-              No upcoming races found
-            </div>
+            <div className="font-mono text-pitwall-dim text-sm mt-2">Season complete</div>
           </div>
         )}
       </section>
@@ -186,6 +302,16 @@ export default function Home() {
 
         {/* ── Left column ─────────────────────────────────────────── */}
         <div className="flex-1 min-w-0 border-r border-pitwall-border">
+
+          {/* Race weekend schedule — shown during active weekends */}
+          {isWeekend && weekendSessions.length > 0 && (
+            <section className="p-6 border-b border-pitwall-border">
+              <div className="font-mono text-pitwall-ghost text-xs tracking-widest uppercase mb-4">
+                Weekend Schedule
+              </div>
+              <WeekendSchedule weekendSessions={weekendSessions} />
+            </section>
+          )}
 
           {/* Championship leader */}
           {standings.drivers.length > 0 && (

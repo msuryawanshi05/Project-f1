@@ -47,15 +47,8 @@ export function useJolpica() {
             ?.ConstructorStandings ?? []
 
         setStandings(driverStandings, ctorStandings)
-
-        console.debug(
-          `[Jolpica] Loaded: ${races.length} races, ` +
-          `${driverStandings.length} drivers, ` +
-          `${ctorStandings.length} constructors`
-        )
       } catch (err) {
         if (!cancelled) {
-          console.error('[Jolpica] Fetch failed:', err)
           setError(err.message)
         }
       } finally {

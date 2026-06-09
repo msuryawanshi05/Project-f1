@@ -15,7 +15,8 @@
     "lap_record_year": 2022,
     "drs_zones": 4,
     "sprint": false,
-    "wikipedia": "Albert_Park_Circuit"
+    "wikipedia": "Albert_Park_Circuit",
+    "svg": "albert_park"
   },
   {
     "round": 2,
@@ -33,7 +34,8 @@
     "lap_record_year": 2004,
     "drs_zones": 2,
     "sprint": true,
-    "wikipedia": "Shanghai_International_Circuit"
+    "wikipedia": "Shanghai_International_Circuit",
+    "svg": "shanghai"
   },
   {
     "round": 3,
@@ -51,7 +53,8 @@
     "lap_record_year": 2019,
     "drs_zones": 1,
     "sprint": false,
-    "wikipedia": "Suzuka_Circuit"
+    "wikipedia": "Suzuka_Circuit",
+    "svg": "suzuka"
   },
   {
     "round": 4,
@@ -69,7 +72,8 @@
     "lap_record_year": 2005,
     "drs_zones": 3,
     "sprint": false,
-    "wikipedia": "Bahrain_International_Circuit"
+    "wikipedia": "Bahrain_International_Circuit",
+    "svg": "bahrain"
   },
   {
     "round": 5,
@@ -87,7 +91,8 @@
     "lap_record_year": 2021,
     "drs_zones": 3,
     "sprint": false,
-    "wikipedia": "Jeddah_Street_Circuit"
+    "wikipedia": "Jeddah_Street_Circuit",
+    "svg": "jeddah"
   },
   {
     "round": 6,
@@ -105,7 +110,8 @@
     "lap_record_year": 2023,
     "drs_zones": 3,
     "sprint": true,
-    "wikipedia": "Miami_International_Autodrome"
+    "wikipedia": "Miami_International_Autodrome",
+    "svg": "miami"
   },
   {
     "round": 7,
@@ -123,7 +129,8 @@
     "lap_record_year": 2019,
     "drs_zones": 2,
     "sprint": false,
-    "wikipedia": "Circuit_Gilles_Villeneuve"
+    "wikipedia": "Circuit_Gilles_Villeneuve",
+    "svg": "villeneuve"
   },
   {
     "round": 8,
@@ -141,7 +148,8 @@
     "lap_record_year": 2021,
     "drs_zones": 1,
     "sprint": false,
-    "wikipedia": "Circuit_de_Monaco"
+    "wikipedia": "Circuit_de_Monaco",
+    "svg": "monaco"
   },
   {
     "round": 9,
@@ -159,7 +167,8 @@
     "lap_record_year": 2023,
     "drs_zones": 2,
     "sprint": false,
-    "wikipedia": "Circuit_de_Barcelona-Catalunya"
+    "wikipedia": "Circuit_de_Barcelona-Catalunya",
+    "svg": "barcelona"
   },
   {
     "round": 10,
@@ -177,7 +186,8 @@
     "lap_record_year": 2020,
     "drs_zones": 2,
     "sprint": false,
-    "wikipedia": "Red_Bull_Ring"
+    "wikipedia": "Red_Bull_Ring",
+    "svg": "red_bull_ring"
   },
   {
     "round": 11,
@@ -195,7 +205,8 @@
     "lap_record_year": 2020,
     "drs_zones": 2,
     "sprint": false,
-    "wikipedia": "Silverstone_Circuit"
+    "wikipedia": "Silverstone_Circuit",
+    "svg": "silverstone"
   },
   {
     "round": 12,
@@ -213,7 +224,8 @@
     "lap_record_year": 2018,
     "drs_zones": 2,
     "sprint": true,
-    "wikipedia": "Circuit_de_Spa-Francorchamps"
+    "wikipedia": "Circuit_de_Spa-Francorchamps",
+    "svg": "spa"
   },
   {
     "round": 13,
@@ -231,7 +243,8 @@
     "lap_record_year": 2020,
     "drs_zones": 1,
     "sprint": false,
-    "wikipedia": "Hungaroring"
+    "wikipedia": "Hungaroring",
+    "svg": "hungaroring"
   },
   {
     "round": 14,
@@ -249,7 +262,8 @@
     "lap_record_year": 2021,
     "drs_zones": 2,
     "sprint": false,
-    "wikipedia": "Circuit_Zandvoort"
+    "wikipedia": "Circuit_Zandvoort",
+    "svg": "zandvoort"
   },
   {
     "round": 15,
@@ -267,7 +281,8 @@
     "lap_record_year": 2004,
     "drs_zones": 2,
     "sprint": false,
-    "wikipedia": "Autodromo_Nazionale_Monza"
+    "wikipedia": "Autodromo_Nazionale_Monza",
+    "svg": "monza"
   },
   {
     "round": 16,
@@ -285,7 +300,8 @@
     "lap_record_year": null,
     "drs_zones": 3,
     "sprint": false,
-    "wikipedia": "Circuito_de_Madrid"
+    "wikipedia": "Circuito_de_Madrid",
+    "svg": "madrid"
   },
   {
     "round": 17,
@@ -303,7 +319,8 @@
     "lap_record_year": 2019,
     "drs_zones": 2,
     "sprint": false,
-    "wikipedia": "Baku_City_Circuit"
+    "wikipedia": "Baku_City_Circuit",
+    "svg": "baku"
   },
   {
     "round": 18,
@@ -321,7 +338,8 @@
     "lap_record_year": 2023,
     "drs_zones": 3,
     "sprint": false,
-    "wikipedia": "Marina_Bay_Street_Circuit"
+    "wikipedia": "Marina_Bay_Street_Circuit",
+    "svg": "marina_bay"
   },
   {
     "round": 19,
@@ -339,7 +357,8 @@
     "lap_record_year": 2019,
     "drs_zones": 2,
     "sprint": true,
-    "wikipedia": "Circuit_of_the_Americas"
+    "wikipedia": "Circuit_of_the_Americas",
+    "svg": "cota"
   },
   {
     "round": 20,
@@ -357,7 +376,8 @@
     "lap_record_year": 2021,
     "drs_zones": 3,
     "sprint": false,
-    "wikipedia": "Autódromo_Hermanos_Rodríguez"
+    "wikipedia": "Autódromo_Hermanos_Rodríguez",
+    "svg": "rodriguez"
   },
   {
     "round": 21,
@@ -375,7 +395,8 @@
     "lap_record_year": 2018,
     "drs_zones": 2,
     "sprint": false,
-    "wikipedia": "Autódromo_José_Carlos_Pace"
+    "wikipedia": "Autódromo_José_Carlos_Pace",
+    "svg": "interlagos"
   },
   {
     "round": 22,
@@ -393,7 +414,8 @@
     "lap_record_year": 2023,
     "drs_zones": 3,
     "sprint": false,
-    "wikipedia": "Las_Vegas_Street_Circuit"
+    "wikipedia": "Las_Vegas_Street_Circuit",
+    "svg": "las_vegas"
   },
   {
     "round": 23,
@@ -411,7 +433,8 @@
     "lap_record_year": 2023,
     "drs_zones": 2,
     "sprint": true,
-    "wikipedia": "Lusail_International_Circuit"
+    "wikipedia": "Lusail_International_Circuit",
+    "svg": "losail"
   },
   {
     "round": 24,
@@ -429,6 +452,7 @@
     "lap_record_year": 2021,
     "drs_zones": 2,
     "sprint": false,
-    "wikipedia": "Yas_Marina_Circuit"
+    "wikipedia": "Yas_Marina_Circuit",
+    "svg": "yas_marina"
   }
 ]

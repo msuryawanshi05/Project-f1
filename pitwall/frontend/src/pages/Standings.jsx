@@ -106,7 +106,6 @@ function ConstructorRow({ entry, maxPts, isLeader }) {
 export default function Standings() {
   const [tab, setTab] = useState('DRIVERS')
   const standings = useF1Store((s) => s.standings)
-  const drivers   = useF1Store((s) => s.drivers)
   const settings  = useF1Store((s) => s.settings)
 
   const driverStandings = standings.drivers ?? []

@@ -100,7 +100,7 @@ def clean_timing(raw: dict) -> dict:
                 "deleted_lap":   bool(d.get("DeletedLap", False)),
             })
         except Exception:
-            logger.exception(f"clean_timing failed for driver {num_str}")
+            logger.exception("clean_timing failed for driver %s", num_str)
     return {"drivers": drivers}
 
 
@@ -125,7 +125,7 @@ def clean_tyres(raw: dict) -> dict:
                 "new_tyre":     bool(s.get("New", True)),
             })
         except Exception:
-            logger.exception(f"clean_tyres failed for driver {num_str}")
+            logger.exception("clean_tyres failed for driver %s", num_str)
     return {"drivers": drivers}
 
 
@@ -150,7 +150,7 @@ def clean_car_data(raw: dict) -> dict:
                     "drs":      _DRS_MAP.get(drs_raw, "off"),
                 })
             except Exception:
-                logger.exception(f"clean_car_data failed for driver {num_str}")
+                logger.exception("clean_car_data failed for driver %s", num_str)
     return {"entries": entries}
 
 
@@ -245,7 +245,7 @@ def clean_driver_list(raw: dict) -> dict:
                 "team_colour": colour,
             })
         except Exception:
-            logger.exception(f"clean_driver_list failed for driver {num_str}")
+            logger.exception("clean_driver_list failed for driver %s", num_str)
     return {"drivers": drivers}
 
 
@@ -273,7 +273,7 @@ def _route_message(topic: str, data: dict) -> Optional[dict]:
         cleaned = cleaner(data)
         return _envelope(msg_type, cleaned)
     except Exception:
-        logger.exception(f"Cleaner failed for topic {topic!r}")
+        logger.exception("Cleaner failed for topic %r", topic)
         return None
 
 
@@ -358,7 +358,7 @@ class PitwallSignalRClient:
             try:
                 data_raw = json.loads(data_raw)
             except json.JSONDecodeError:
-                logger.debug(f"JSON decode error for topic {topic}")
+                logger.debug("JSON decode error for topic %s", topic)
                 return
 
         envelope = _route_message(topic, data_raw)
@@ -381,13 +381,14 @@ class PitwallSignalRClient:
         for attempt in range(1, MAX_RETRIES + 1):
             if not self._running:
                 break
-            logger.info(f"SignalR connection attempt {attempt}/{MAX_RETRIES}")
+            logger.info("SignalR connection attempt %d/%d", attempt, MAX_RETRIES)
             success = self._attempt_connect()
             if success:
                 return
             if attempt < MAX_RETRIES:
                 logger.warning(
-                    f"SignalR attempt {attempt} failed — retrying in {RETRY_DELAY}s"
+                    "SignalR attempt %d failed — retrying in %ds",
+                    attempt, RETRY_DELAY,
                 )
                 time.sleep(RETRY_DELAY)
 
@@ -401,7 +402,7 @@ class PitwallSignalRClient:
             resp = requests.options(_NEGOTIATE_URL, timeout=10)
             cookie = resp.cookies.get("AWSALBCORS", "")
             headers = {"Cookie": f"AWSALBCORS={cookie}"} if cookie else {}
-            logger.info(f"Cookie obtained: {'yes' if cookie else 'no (may still work)'}")
+            logger.info("Cookie obtained: %s", 'yes' if cookie else 'no (may still work)')
 
             options = {
                 "verify_ssl": True,
@@ -432,7 +433,7 @@ class PitwallSignalRClient:
                 return False
 
             # Subscribe to all topics
-            logger.info(f"Subscribing to {len(TOPICS)} topics...")
+            logger.info("Subscribing to %d topics...", len(TOPICS))
             self._connection.send("Subscribe", [TOPICS], on_invocation=self._handle_feed)
 
             # Supervise — stay alive while session runs

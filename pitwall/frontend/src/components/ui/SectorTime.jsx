@@ -5,7 +5,7 @@ import { memo } from 'react'
  * Props: seconds (number|null), colourClass ("purple"|"green"|"yellow"|"white")
  */
 const SectorTime = memo(function SectorTime({ seconds, colourClass = 'white' }) {
-  const display = seconds == null || isNaN(seconds)
+  const display = seconds == null || Number.isNaN(Number(seconds))
     ? '--.---'
     : Number(seconds).toFixed(3)
 

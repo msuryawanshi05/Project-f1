@@ -29,7 +29,7 @@ async def init_db() -> None:
             )
         """)
         await db.commit()
-    logger.info(f"DB initialised at {DB_PATH}")
+    logger.info("DB initialised at %s", DB_PATH)
 
 
 async def cache_set(key: str, value: dict) -> None:
@@ -50,7 +50,7 @@ async def cache_set(key: str, value: dict) -> None:
             )
             await db.commit()
     except Exception:
-        logger.exception(f"cache_set failed for key={key!r}")
+        logger.exception("cache_set failed for key=%r", key)
 
 
 async def cache_get(key: str) -> dict | None:
@@ -65,7 +65,7 @@ async def cache_get(key: str) -> dict | None:
             return json.loads(row[0])
         return None
     except Exception:
-        logger.exception(f"cache_get failed for key={key!r}")
+        logger.exception("cache_get failed for key=%r", key)
         return None
 
 

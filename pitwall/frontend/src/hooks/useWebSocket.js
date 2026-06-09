@@ -108,7 +108,10 @@ export function useWebSocket() {
         setSession({ ...useF1Store.getState().session, ...data })
         break
       default:
-        console.debug('[WS] Unhandled message type:', type)
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.debug('[WS] Unhandled message type:', type)
+        }
     }
   }
 
@@ -120,11 +123,10 @@ export function useWebSocket() {
         const json = await res.json()
         if (json.session_key) {
           setCurrentSessionKey(json.session_key)
-          console.debug('[WS] Current session key:', json.session_key)
         }
       }
-    } catch (e) {
-      console.debug('[WS] Could not fetch current session:', e.message)
+    } catch (_e) {
+      // Network error fetching session — non-critical, silent in production
     }
   }
 
@@ -138,7 +140,6 @@ export function useWebSocket() {
     ws.onopen = () => {
       setConnected(true)
       connectedRef.current = true
-      console.debug('[WS] Connected to', WS_URL)
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = null
@@ -153,14 +154,13 @@ export function useWebSocket() {
       let msg
       try {
         msg = JSON.parse(event.data)
-      } catch (e) {
-        console.warn('[WS] Failed to parse message:', e)
+      } catch (_e) {
         return
       }
 
       // Handle ping — respond with pong (backend doesn't require it, but good practice)
       if (msg.type === 'ping') {
-        try { ws.send(JSON.stringify({ type: 'pong' })) } catch (sendErr) { console.debug('[WS] pong failed', sendErr) }
+        try { ws.send(JSON.stringify({ type: 'pong' })) } catch (_sendErr) { /* ignore */ }
         return
       }
 
@@ -176,14 +176,12 @@ export function useWebSocket() {
     ws.onclose = () => {
       setConnected(false)
       connectedRef.current = false
-      console.debug('[WS] Disconnected — reconnecting in', RECONNECT_DELAY_MS, 'ms')
       reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS)
     }
 
     ws.onerror = (err) => {
       const errMsg = `WS error at ${new Date().toLocaleTimeString()}`
       devMonitor.recentErrors = [errMsg, ...devMonitor.recentErrors].slice(0, 5)
-      console.warn('[WS] Error:', err)
       ws.close()
     }
   }
@@ -197,7 +195,6 @@ export function useWebSocket() {
         document.visibilityState === 'visible' &&
         wsRef.current?.readyState !== WebSocket.OPEN
       ) {
-        console.debug('[WS] Tab visible — reconnecting')
         if (reconnectTimerRef.current) {
           clearTimeout(reconnectTimerRef.current)
           reconnectTimerRef.current = null

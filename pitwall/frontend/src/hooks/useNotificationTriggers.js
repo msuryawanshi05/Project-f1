@@ -37,7 +37,7 @@ export default function useNotificationTriggers() {
   // DRS cooldown: track last message text to avoid duplicates
   const lastDrsMsg      = useRef(null)
 
-  // ── DEV: expose store to console ─────────────────────────────────────────
+  // DEV-only: expose store for browser console debugging
   useEffect(() => {
     if (import.meta.env.DEV) {
       globalThis.__pitwall_store = useF1Store.getState()

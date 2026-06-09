@@ -120,7 +120,7 @@ export default function StrategyTab() {
 
   // Sort drivers by current race position
   const sortedTimings = useMemo(
-    () => [...timing].sort((a, b) => (parseInt(a.position) || 99) - (parseInt(b.position) || 99)),
+    () => [...timing].sort((a, b) => (parseInt(a.position, 10) || 99) - (parseInt(b.position, 10) || 99)),
     [timing]
   )
 
@@ -204,7 +204,7 @@ export default function StrategyTab() {
                   <div className="flex-1 flex h-full" style={{ position: 'relative' }}>
                     {stints.map((s, i) => (
                       <StintBlock
-                        key={i}
+                        key={`stint-${num}-${s.lap_start ?? i}`}
                         compound={s.compound}
                         lapStart={s.lap_start ?? 0}
                         lapEnd={s.lap_end ?? currentLap}
@@ -259,7 +259,7 @@ export default function StrategyTab() {
               No pit stops logged yet
             </div>
           ) : (
-            pitStops.map((stop, i) => <PitRow key={i} stop={stop} />)
+            pitStops.map((stop) => <PitRow key={`pit-${stop.driver_number}-${stop.stop_number}`} stop={stop} />)
           )}
         </div>
       </div>

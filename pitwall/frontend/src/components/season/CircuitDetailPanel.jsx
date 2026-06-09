@@ -22,15 +22,6 @@ function sanitiseThumbnailUrl(src) {
 
 const IST_OFFSET = 330
 
-function toIST(utcDateStr) {
-  if (!utcDateStr) return '—'
-  const d = new Date(utcDateStr)
-  if (Number.isNaN(d.getTime())) return '—'
-  const istMs = d.getTime() + IST_OFFSET * 60000
-  const ist   = new Date(istMs)
-  return ist.toUTCString().replace(' GMT', '').split(' ').slice(0, 5).join(' ')
-}
-
 function formatSession(dateStr, timeStr) {
   if (!dateStr) return { date: '—', ist: '—' }
   const fullISO = timeStr ? `${dateStr}T${timeStr}` : `${dateStr}T00:00:00Z`

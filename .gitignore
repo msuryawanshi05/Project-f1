@@ -39,3 +39,6 @@ model_capabilities.yaml
 adapters/
 docs/
 scripts/
+
+# Logs
+*.log

@@ -88,9 +88,9 @@ def _load_sessions() -> list[dict]:
                     "sprint": circuit.get("sprint", False),
                 })
             except ValueError:
-                logger.warning(f"Could not parse date {date_str!r} for {circuit.get('name')}")
+                logger.warning("Could not parse date %r for %s", date_str, circuit.get('name'))
     except FileNotFoundError:
-        logger.warning(f"circuits.json not found at {CIRCUITS_JSON}")
+        logger.warning("circuits.json not found at %s", CIRCUITS_JSON)
     except json.JSONDecodeError:
         logger.exception("Could not parse circuits.json")
     return sessions
@@ -118,7 +118,7 @@ def start_scheduler(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue) -> No
     _queue_ref = queue
 
     sessions = _load_sessions()
-    logger.info(f"Scheduler: loaded {len(sessions)} rounds from circuits.json")
+    logger.info("Scheduler: loaded %d rounds from circuits.json", len(sessions))
 
     _scheduler = BackgroundScheduler(timezone="UTC")
 
@@ -147,7 +147,7 @@ def start_scheduler(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue) -> No
             scheduled += 1
 
     _scheduler.start()
-    logger.info(f"Scheduler started — {scheduled} future sessions scheduled")
+    logger.info("Scheduler started — %d future sessions scheduled", scheduled)
 
     # If we're currently in a live window, start immediately
     if _is_session_live_now(sessions):

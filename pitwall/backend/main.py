@@ -11,11 +11,14 @@ Architecture:
   SignalR thread → asyncio.Queue → broadcaster → all WebSocket clients
 """
 import asyncio
+import functools
 import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import date
+
+import requests as req_sync
 
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -62,7 +65,7 @@ async def broadcaster():
             for ws in list(connected_clients):
                 try:
                     await ws.send_text(payload)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     dead.add(ws)
             connected_clients.difference_update(dead)
 
@@ -83,7 +86,7 @@ async def lifespan(app: FastAPI):
     logger.info("Broadcaster task created")
 
     # Start scheduler (auto-starts SignalR client near session times)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     start_scheduler(loop, message_queue)
 
     yield
@@ -124,24 +127,38 @@ async def current_session():
     OpenF1 car_data and radio API calls.
 
     Returns: { session_key, session_name, circuit, year }
+    If OpenF1 is unavailable or returns 401, returns { session_key: None, source: "unavailable" }
     """
     today = date.today()
     year  = today.year
 
+    api_key = os.getenv("OPENF1_API_KEY", "").strip()
+    headers = {"X-Api-Key": api_key} if api_key else {}
+
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             resp = await client.get(
-                f"https://api.openf1.org/v1/sessions",
+                "https://api.openf1.org/v1/sessions",
                 params={"year": year},
+                headers=headers,
             )
+            if resp.status_code == 401:
+                logger.warning(
+                    "OpenF1 returned 401 Unauthorized — set OPENF1_API_KEY in .env to enable live data. "
+                    "Falling back to calendar-only mode."
+                )
+                return {"session_key": None, "source": "no_auth", "error": "OpenF1 requires API key for current year"}
             resp.raise_for_status()
             sessions = resp.json()
+        except httpx.HTTPStatusError as exc:
+            logger.warning("OpenF1 session fetch failed: %s", exc)
+            return {"session_key": None, "source": "http_error", "error": str(exc)}
         except Exception as exc:
-            logger.warning(f"OpenF1 session fetch failed: {exc}")
-            return {"session_key": None, "error": str(exc)}
+            logger.warning("OpenF1 session fetch failed: %s", exc)
+            return {"session_key": None, "source": "error", "error": str(exc)}
 
     if not sessions:
-        return {"session_key": None, "error": "no sessions found"}
+        return {"session_key": None, "source": "no_sessions", "error": "no sessions found"}
 
     # Find best match: prefer a session whose date_start <= today <= date_end
     today_str = today.isoformat()
@@ -163,7 +180,9 @@ async def current_session():
         "session_name": matched.get("session_name"),
         "circuit":      matched.get("circuit_short_name"),
         "year":         matched.get("year"),
+        "source":       "openf1",
     }
+
 
 
 @app.websocket("/ws")
@@ -171,7 +190,7 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     connected_clients.add(ws)
     client_host = ws.client.host if ws.client else "unknown"
-    logger.info(f"WS connected: {client_host} (total: {len(connected_clients)})")
+    logger.info("WS connected: %s (total: %d)", client_host, len(connected_clients))
 
     try:
         # Send all currently cached data so a fresh page load isn't blank
@@ -179,7 +198,7 @@ async def websocket_endpoint(ws: WebSocket):
         if cached:
             for envelope in cached.values():
                 await ws.send_text(json.dumps(envelope))
-            logger.info(f"Sent {len(cached)} cached messages to {client_host}")
+            logger.info("Sent %d cached messages to %s", len(cached), client_host)
         else:
             # No session active — send PRE state
             await ws.send_text(json.dumps({
@@ -198,9 +217,9 @@ async def websocket_endpoint(ws: WebSocket):
                 await ws.send_text(json.dumps({"type": "ping"}))
 
     except WebSocketDisconnect:
-        logger.info(f"WS disconnected: {client_host}")
+        logger.info("WS disconnected: %s", client_host)
     except Exception:
-        logger.exception(f"WS error for {client_host}")
+        logger.exception("WS error for %s", client_host)
     finally:
         connected_clients.discard(ws)
 
@@ -213,9 +232,6 @@ async def circuit_info(article: str):
     and returns 403 with httpx defaults.
     Returns: {title, description, extract, thumbnail_url}
     """
-    import functools
-    import requests as req
-
     url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{article}"
     wiki_headers = {
         "User-Agent": "PITWALL/1.0 (pitwall-f1-dashboard; personal non-commercial)",
@@ -224,7 +240,7 @@ async def circuit_info(article: str):
 
     def _fetch():
         try:
-            r = req.get(url, headers=wiki_headers, timeout=10)
+            r = req_sync.get(url, headers=wiki_headers, timeout=10)
             r.raise_for_status()
             data = r.json()
             return {
@@ -233,10 +249,17 @@ async def circuit_info(article: str):
                 "extract":       data.get("extract"),
                 "thumbnail_url": (data.get("thumbnail") or {}).get("source"),
             }
-        except req.exceptions.HTTPError as e:
-            return {"error": f"Wikipedia returned {e.response.status_code}"}
-        except Exception as e:
+        except req_sync.exceptions.HTTPError as e:
+            return {"error": "Wikipedia returned %d" % e.response.status_code}
+        except Exception as e:  # noqa: BLE001
             return {"error": str(e)}
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, functools.partial(_fetch))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("main:app", host=host, port=port, reload=False, log_level="info")
