@@ -9,7 +9,7 @@
  *   showStats    — whether to show stat chips + lap record below map
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 
 // Country → flag emoji
 const FLAGS = {
@@ -22,48 +22,55 @@ const FLAGS = {
 }
 
 // ── GeoJSON → canvas renderer ─────────────────────────────────────────────────
-function renderCircuit(canvas, coordinates) {
+function renderCircuit(canvas, coordinates, containerW, containerH) {
   if (!canvas || !coordinates?.length) return
 
+  const dpr = window.devicePixelRatio || 1
+  const W   = containerW  || canvas.parentElement?.offsetWidth  || 300
+  const H   = containerH  || canvas.parentElement?.offsetHeight || 200
+
+  // Set canvas pixel dimensions explicitly
+  canvas.width  = W * dpr
+  canvas.height = H * dpr
+
   const ctx = canvas.getContext('2d')
-  const W   = canvas.width
-  const H   = canvas.height
+  ctx.scale(dpr, dpr)
   ctx.clearRect(0, 0, W, H)
 
-  // Flatten + compute bounding box
-  const pts = coordinates.flat ? coordinates.flat(Infinity) : coordinates
+  // Flatten coordinates
+  const pts = Array.isArray(coordinates[0]) ? coordinates : coordinates.flat(Infinity)
+  if (!pts.length) return
+
   const lngs = pts.map((p) => p[0])
   const lats  = pts.map((p) => p[1])
 
   const minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
   const minLat = Math.min(...lats), maxLat = Math.max(...lats)
 
-  const pad   = 0.1
-  const dLng  = (maxLng - minLng) || 0.001
-  const dLat  = (maxLat - minLat) || 0.001
+  const pad  = 0.1
+  const dLng = (maxLng - minLng) || 0.001
+  const dLat = (maxLat - minLat) || 0.001
 
   const toX = (lng) => (((lng - minLng) / dLng) * (1 - 2 * pad) + pad) * W
   // lat increases upward in geo, canvas y goes downward
   const toY = (lat) => ((1 - (lat - minLat) / dLat) * (1 - 2 * pad) + pad) * H
 
-  // Shadow glow
-  ctx.shadowColor = 'rgba(220, 0, 0, 0.35)'
-  ctx.shadowBlur  = 8
-
-  // Outer thick stroke (background line)
+  // Outer thick stroke (background glow)
+  ctx.shadowColor = 'rgba(220, 0, 0, 0.4)'
+  ctx.shadowBlur  = 10
   ctx.beginPath()
   ctx.moveTo(toX(pts[0][0]), toY(pts[0][1]))
   for (let i = 1; i < pts.length; i++) {
     ctx.lineTo(toX(pts[i][0]), toY(pts[i][1]))
   }
   ctx.closePath()
-  ctx.strokeStyle = '#333'
-  ctx.lineWidth   = 5
+  ctx.strokeStyle = '#2a0000'
+  ctx.lineWidth   = 7
   ctx.lineJoin    = 'round'
   ctx.lineCap     = 'round'
   ctx.stroke()
 
-  // Inner bright line
+  // Inner bright red line
   ctx.shadowBlur  = 0
   ctx.beginPath()
   ctx.moveTo(toX(pts[0][0]), toY(pts[0][1]))
@@ -72,8 +79,21 @@ function renderCircuit(canvas, coordinates) {
   }
   ctx.closePath()
   ctx.strokeStyle = '#e10600'
-  ctx.lineWidth   = 2
+  ctx.lineWidth   = 2.5
   ctx.stroke()
+
+  // Thin white highlight on top
+  ctx.globalAlpha = 0.15
+  ctx.beginPath()
+  ctx.moveTo(toX(pts[0][0]), toY(pts[0][1]))
+  for (let i = 1; i < pts.length; i++) {
+    ctx.lineTo(toX(pts[i][0]), toY(pts[i][1]))
+  }
+  ctx.closePath()
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth   = 1
+  ctx.stroke()
+  ctx.globalAlpha = 1
 }
 
 // ── Stat chip ─────────────────────────────────────────────────────────────────
@@ -89,14 +109,15 @@ function StatChip({ label, value }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function TrackMap({ circuitData, compact = false, showStats = true }) {
-  const canvasRef   = useRef(null)
-  const [loading, setLoading]   = useState(false)
-  const [failed,  setFailed]    = useState(false)
-  const [coords,  setCoords]    = useState(null)
+  const canvasRef     = useRef(null)
+  const containerRef  = useRef(null)
+  const [loading, setLoading] = useState(false)
+  const [failed,  setFailed]  = useState(false)
+  const [coords,  setCoords]  = useState(null)
 
   const slug = circuitData?.svg
 
-  // Fetch GeoJSON
+  // Fetch GeoJSON whenever slug changes
   useEffect(() => {
     setLoading(true)
     setFailed(false)
@@ -112,21 +133,15 @@ export default function TrackMap({ circuitData, compact = false, showStats = tru
       })
       .then((geo) => {
         if (cancelled) return
-        // GeoJSON feature collection → extract first LineString or Polygon
+        // GeoJSON feature collection → extract first LineString / Polygon / MultiLineString
         let pts = null
         const features = geo.features ?? (geo.type === 'Feature' ? [geo] : [])
         for (const f of features) {
           const geom = f.geometry
           if (!geom) continue
-          if (geom.type === 'LineString') {
-            pts = geom.coordinates; break
-          }
-          if (geom.type === 'Polygon') {
-            pts = geom.coordinates[0]; break
-          }
-          if (geom.type === 'MultiLineString') {
-            pts = geom.coordinates[0]; break
-          }
+          if (geom.type === 'LineString')      { pts = geom.coordinates; break }
+          if (geom.type === 'Polygon')         { pts = geom.coordinates[0]; break }
+          if (geom.type === 'MultiLineString') { pts = geom.coordinates.flat(1); break }
         }
         if (!pts?.length) throw new Error('no coordinates')
         setCoords(pts)
@@ -139,46 +154,55 @@ export default function TrackMap({ circuitData, compact = false, showStats = tru
     return () => { cancelled = true }
   }, [slug])
 
-  // Draw on canvas whenever coords arrive or canvas resizes
+  // Draw function — needs measured container dimensions
   const draw = useCallback(() => {
-    if (canvasRef.current && coords) {
-      const el = canvasRef.current
-      el.width  = el.offsetWidth  * window.devicePixelRatio
-      el.height = el.offsetHeight * window.devicePixelRatio
-      const ctx = el.getContext('2d')
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
-      renderCircuit(el, coords)
-    }
+    if (!canvasRef.current || !coords || !containerRef.current) return
+    const el  = containerRef.current
+    const W   = el.offsetWidth
+    const H   = el.offsetHeight
+    if (W === 0 || H === 0) return
+    renderCircuit(canvasRef.current, coords, W, H)
   }, [coords])
 
-  useEffect(() => {
+  // useLayoutEffect fires AFTER the DOM is painted, so offsetWidth/Height are real
+  useLayoutEffect(() => {
     draw()
   }, [draw])
+
+  // ResizeObserver ensures re-draw on container size changes
+  useEffect(() => {
+    if (!containerRef.current) return
+    const obs = new ResizeObserver(() => {
+      if (coords) draw()
+    })
+    obs.observe(containerRef.current)
+    return () => obs.disconnect()
+  }, [coords, draw])
 
   const flag    = FLAGS[circuitData?.country] ?? '🏁'
   const raceLen = circuitData
     ? ((circuitData.laps ?? 0) * (circuitData.length_km ?? 0)).toFixed(2)
     : null
 
-  const mapHeight = compact ? 130 : 200
+  const mapHeight = compact ? 140 : 220
 
   return (
     <div className="w-full flex flex-col gap-2">
 
       {/* ── Track canvas / fallback ──────────────────────────── */}
       <div
+        ref={containerRef}
         className="w-full border border-pitwall-border bg-[#090909] relative overflow-hidden"
         style={{ height: mapHeight }}
       >
         {!failed && !loading && coords ? (
           <canvas
             ref={canvasRef}
-            className="w-full h-full"
-            style={{ display: 'block' }}
+            style={{ display: 'block', width: '100%', height: '100%' }}
           />
         ) : loading ? (
           <div className="w-full h-full flex items-center justify-center">
-            <div className="w-1/2 h-1/2 rounded animate-pulse bg-[#111]" />
+            <div className="w-16 h-16 rounded-full border border-pitwall-border animate-pulse bg-[#111]" />
           </div>
         ) : (
           /* Fallback — flag + name card */
@@ -208,7 +232,7 @@ export default function TrackMap({ circuitData, compact = false, showStats = tru
         <div className="grid grid-cols-4 gap-1">
           <StatChip label="Laps"   value={circuitData.laps} />
           <StatChip label="Length" value={`${circuitData.length_km} km`} />
-          <StatChip label="DRS"    value={`${circuitData.drs_zones} zones`} />
+          <StatChip label="Turns"  value={circuitData.turns ?? circuitData.corners ?? '—'} />
           <StatChip label="Dist."  value={raceLen ? `${raceLen} km` : null} />
         </div>
       )}

@@ -69,13 +69,14 @@ export default function Settings() {
           </div>
           <button
             onClick={() => updateSettings({ soundEnabled: !settings.soundEnabled })}
-            className={`w-12 h-6 rounded transition-colors relative flex-shrink-0 ${
+            aria-label="Toggle sound alerts"
+            className={`w-12 h-6 rounded transition-colors relative flex-shrink-0 overflow-hidden ${
               settings.soundEnabled ? 'bg-status-green' : 'bg-pitwall-muted'
             }`}
           >
             <span
-              className={`absolute top-0.5 w-5 h-5 bg-white rounded transition-transform ${
-                settings.soundEnabled ? 'translate-x-6' : 'translate-x-0.5'
+              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded transition-transform duration-200 ${
+                settings.soundEnabled ? 'translate-x-6' : 'translate-x-0'
               }`}
             />
           </button>
@@ -119,13 +120,14 @@ export default function Settings() {
           </div>
           <button
             onClick={() => updateSettings({ darkMode: !settings.darkMode })}
-            className={`w-12 h-6 rounded transition-colors relative flex-shrink-0 ${
+            aria-label="Toggle dark mode"
+            className={`w-12 h-6 rounded transition-colors relative flex-shrink-0 overflow-hidden ${
               settings.darkMode ? 'bg-status-green' : 'bg-pitwall-muted'
             }`}
           >
             <span
-              className={`absolute top-0.5 w-5 h-5 bg-white rounded transition-transform ${
-                settings.darkMode ? 'translate-x-6' : 'translate-x-0.5'
+              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded transition-transform duration-200 ${
+                settings.darkMode ? 'translate-x-6' : 'translate-x-0'
               }`}
             />
           </button>

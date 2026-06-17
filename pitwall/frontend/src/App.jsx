@@ -12,10 +12,23 @@ import Standings from './pages/Standings'
 import Results from './pages/Results'
 import Settings from './pages/Settings'
 import { unlockAudio } from './utils/notificationSounds'
+import useF1Store from './store/useF1Store'
 
 function App() {
   const { connected } = useWebSocket()
   useJolpica()
+
+  const darkMode = useF1Store((s) => s.settings.darkMode)
+
+  // ── Dark mode class toggle ──────────────────────────────────────────────────
+  // When darkMode is true, add 'dark' to <html>; remove it for light mode.
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+  }, [darkMode])
 
   // Unlock AudioContext on first user interaction (browser autoplay policy)
   useEffect(() => {
@@ -40,4 +53,3 @@ function App() {
 }
 
 export default App
-

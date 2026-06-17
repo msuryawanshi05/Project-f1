@@ -10,12 +10,36 @@
   padding: 0;
 }
 
+/* ── Dark mode (default — 'dark' class on <html>) ─────────────────── */
 body {
   background-color: #0A0A0A;
   color: #E5E5E5;
   font-family: 'Inter', system-ui, sans-serif;
   overflow-x: hidden;
 }
+
+/* ── Light mode overrides (when 'dark' class is NOT on <html>) ────── */
+html:not(.dark) body {
+  background-color: #F4F4F5;
+  color: #111111;
+}
+html:not(.dark) header,
+html:not(.dark) nav,
+html:not(.dark) main,
+html:not(.dark) section,
+html:not(.dark) div {
+  --tw-bg-pitwall-bg:      #F4F4F5;
+  --tw-bg-pitwall-surface: #FFFFFF;
+}
+/* Override Tailwind pitwall-bg bg color in light mode */
+html:not(.dark) .bg-pitwall-bg      { background-color: #F0F0F1 !important; }
+html:not(.dark) .bg-pitwall-surface { background-color: #FFFFFF !important; }
+html:not(.dark) .border-pitwall-border { border-color: #E4E4E7 !important; }
+html:not(.dark) .text-pitwall-text  { color: #111111 !important; }
+html:not(.dark) .text-pitwall-dim   { color: #555555 !important; }
+html:not(.dark) .text-pitwall-ghost { color: #999999 !important; }
+html:not(.dark) .text-white         { color: #111111 !important; }
+
 
 /* ── Typography helpers ──────────────────────────────────────── */
 .timing-number {

@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: [
     './index.html',
     './src/**/*.{js,ts,jsx,tsx}',
@@ -60,10 +61,15 @@ export default {
           '50%':  { opacity: '0.7' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        'slide-in-right': {
+          '0%':   { transform: 'translateX(100%)', opacity: '0' },
+          '100%': { transform: 'translateX(0)',    opacity: '1' },
+        },
       },
       animation: {
-        ticker:    'ticker 30s linear infinite',
-        pulse_dot: 'pulse_dot 2s ease-in-out infinite',
+        ticker:            'ticker 30s linear infinite',
+        pulse_dot:         'pulse_dot 2s ease-in-out infinite',
+        'slide-in-right':  'slide-in-right 0.25s ease-out both',
       },
     },
   },

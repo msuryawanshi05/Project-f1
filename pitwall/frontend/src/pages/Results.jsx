@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import useF1Store from '../store/useF1Store'
+import useRaceWeekendState from '../hooks/useRaceWeekendState'
 import RaceStoryStack from '../components/results/RaceStoryStack'
 
 const BASE = 'https://api.jolpi.ca/ergast/f1/2026'
@@ -59,6 +61,10 @@ export default function Results() {
   const now = new Date()
   const pastRaces = calendar.filter((r) => new Date(r.date) < now)
 
+  // ── Upcoming race context ────────────────────────────────────────────────────
+  const { currentRace, nextSession, circuitData } = useRaceWeekendState()
+  const nextRace = currentRace ?? calendar.find((r) => new Date(r.date) >= now) ?? null
+
   async function loadRound(round) {
     if (selected === round) { setSelected(null); setShowStory(false); return }
     setSelected(round)
@@ -90,6 +96,25 @@ export default function Results() {
           {pastRaces.length} completed rounds
         </div>
       </div>
+
+      {/* Upcoming race banner */}
+      {nextRace && (
+        <div className="border-b border-pitwall-border px-6 py-3 flex items-center gap-4 bg-[#0d0d0d]">
+          <span className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase flex-shrink-0">
+            Next Race
+          </span>
+          <span className="font-display font-semibold text-sm text-pitwall-text tracking-wide flex-1 truncate">
+            {getFlag(nextRace.Circuit?.Location?.country)} {nextRace.raceName}
+          </span>
+          <span className="font-mono text-xs text-pitwall-dim flex-shrink-0">{nextRace.date}</span>
+          <Link
+            to="/"
+            className="font-mono text-[10px] text-pitwall-ghost hover:text-status-red tracking-widest border border-pitwall-border hover:border-status-red/50 px-2 py-0.5 transition-colors flex-shrink-0"
+          >
+            DETAILS →
+          </Link>
+        </div>
+      )}
 
       {/* Race selector */}
       <div className="border-b border-pitwall-border">
