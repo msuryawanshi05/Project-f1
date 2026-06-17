@@ -4,74 +4,164 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ══════════════════════════════════════════════════════════════════
+   CSS CUSTOM PROPERTIES — Theme tokens
+   Consumed by all components via var(--pw-*) instead of hard-coded
+   colors, ensuring dark/light mode works everywhere automatically.
+══════════════════════════════════════════════════════════════════ */
+
+/* ── DARK mode (default — .dark class on <html>) ─────────────── */
+:root,
+html.dark {
+  --pw-bg:          #0A0A0A;
+  --pw-surface:     #111111;
+  --pw-surface-2:   #151515;
+  --pw-border:      #222222;
+  --pw-muted:       #333333;
+  --pw-ghost:       #555555;
+  --pw-dim:         #888888;
+  --pw-text:        #C8C8C8;
+  --pw-text-strong: #F0F0F0;
+  --pw-red:         #E8002D;
+  --pw-green:       #00A651;
+  --pw-yellow:      #FFF200;
+  --pw-purple:      #B468FF;
+  --pw-teal:        #00D2BE;
+
+  /* Scrollbar */
+  --pw-scroll-track: #0A0A0A;
+  --pw-scroll-thumb: #1E1E1E;
+
+  /* Countdown */
+  --pw-countdown-digit: #FFFFFF;
+  --pw-countdown-label: #444444;
+}
+
+/* ── LIGHT mode (.dark class NOT on <html>) ───────────────────── */
+html:not(.dark) {
+  --pw-bg:          #F0F0F0;
+  --pw-surface:     #FAFAFA;
+  --pw-surface-2:   #F5F5F5;
+  --pw-border:      #DEDEDE;
+  --pw-muted:       #CCCCCC;
+  --pw-ghost:       #8C8C8C;
+  --pw-dim:         #555555;
+  --pw-text:        #2C2C2C;
+  --pw-text-strong: #0A0A0A;
+  --pw-red:         #CC0025;
+  --pw-green:       #007A3D;
+  --pw-yellow:      #B8A800;
+  --pw-purple:      #7B2FBE;
+  --pw-teal:        #008B7A;
+
+  --pw-scroll-track: #E8E8E8;
+  --pw-scroll-thumb: #CCCCCC;
+
+  --pw-countdown-digit: #0A0A0A;
+  --pw-countdown-label: #888888;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   BASE RESET & BODY
+══════════════════════════════════════════════════════════════════ */
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-/* ── Dark mode (default — 'dark' class on <html>) ─────────────────── */
 body {
-  background-color: #0A0A0A;
-  color: #E5E5E5;
+  background-color: var(--pw-bg);
+  color: var(--pw-text);
   font-family: 'Inter', system-ui, sans-serif;
   overflow-x: hidden;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-/* ── Light mode overrides (when 'dark' class is NOT on <html>) ────── */
-html:not(.dark) body {
-  background-color: #F4F4F5;
-  color: #111111;
-}
-html:not(.dark) header,
-html:not(.dark) nav,
-html:not(.dark) main,
-html:not(.dark) section,
-html:not(.dark) div {
-  --tw-bg-pitwall-bg:      #F4F4F5;
-  --tw-bg-pitwall-surface: #FFFFFF;
-}
-/* Override Tailwind pitwall-bg bg color in light mode */
-html:not(.dark) .bg-pitwall-bg      { background-color: #F0F0F1 !important; }
-html:not(.dark) .bg-pitwall-surface { background-color: #FFFFFF !important; }
-html:not(.dark) .border-pitwall-border { border-color: #E4E4E7 !important; }
-html:not(.dark) .text-pitwall-text  { color: #111111 !important; }
-html:not(.dark) .text-pitwall-dim   { color: #555555 !important; }
-html:not(.dark) .text-pitwall-ghost { color: #999999 !important; }
-html:not(.dark) .text-white         { color: #111111 !important; }
+/* ══════════════════════════════════════════════════════════════════
+   TAILWIND OVERRIDES — sync Tailwind utilities with our tokens
+══════════════════════════════════════════════════════════════════ */
+.bg-pitwall-bg       { background-color: var(--pw-bg)      !important; }
+.bg-pitwall-surface  { background-color: var(--pw-surface)  !important; }
+.border-pitwall-border { border-color:   var(--pw-border)   !important; }
+.text-pitwall-text   { color: var(--pw-text)                !important; }
+.text-pitwall-dim    { color: var(--pw-dim)                 !important; }
+.text-pitwall-ghost  { color: var(--pw-ghost)               !important; }
 
+/* Force white text to adapt to mode */
+html:not(.dark) .text-white { color: var(--pw-text-strong) !important; }
 
-/* ── Typography helpers ──────────────────────────────────────── */
+/* status-red should match our token */
+.text-status-red  { color: var(--pw-red)   !important; }
+.border-status-red { border-color: var(--pw-red) !important; }
+
+/* ══════════════════════════════════════════════════════════════════
+   TYPOGRAPHY HELPERS
+══════════════════════════════════════════════════════════════════ */
 .timing-number {
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
   letter-spacing: 0.02em;
 }
-
 .display-font {
   font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
 }
 
-/* ── Sector colours ──────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   COUNTDOWN DIGITS
+══════════════════════════════════════════════════════════════════ */
+.countdown-unit {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 2.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--pw-countdown-digit);
+  line-height: 1;
+}
+.countdown-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--pw-countdown-label);
+  text-transform: uppercase;
+  text-align: center;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SECTOR COLOURS
+══════════════════════════════════════════════════════════════════ */
 .sector-purple { color: #B468FF; }
 .sector-green  { color: #00D2BE; }
 .sector-yellow { color: #FFF200; }
-.sector-white  { color: #FFFFFF; }
 
-/* ── Team colour left bar on driver rows ──────────────────────── */
-.team-bar {
-  width: 3px;
-  flex-shrink: 0;
-  border-radius: 1px;
+/* ══════════════════════════════════════════════════════════════════
+   LED PULSE DOT (live indicator)
+══════════════════════════════════════════════════════════════════ */
+@keyframes led-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px currentColor; }
+  50%       { opacity: 0.4; box-shadow: none; }
 }
-
-/* ── Deleted lap time ─────────────────────────────────────────── */
-.lap-deleted {
-  text-decoration: line-through;
-  opacity: 0.4;
+.led-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  animation: led-pulse 2s ease-in-out infinite;
 }
+.led-dot.green  { background: var(--pw-green);  color: var(--pw-green);  }
+.led-dot.red    { background: var(--pw-red);    color: var(--pw-red);    }
+.led-dot.yellow { background: var(--pw-yellow); color: var(--pw-yellow); }
+.led-dot.dim    { background: var(--pw-ghost);  color: var(--pw-ghost);  animation: none; }
 
-/* ── Scrolling ticker ─────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   SCROLLBAR
+══════════════════════════════════════════════════════════════════ */
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: var(--pw-scroll-track); }
+::-webkit-scrollbar-thumb  { background: var(--pw-scroll-thumb); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--pw-muted); }
+
+/* ══════════════════════════════════════════════════════════════════
+   SCROLLING TICKER
+══════════════════════════════════════════════════════════════════ */
 @keyframes ticker-scroll {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }
@@ -82,70 +172,47 @@ html:not(.dark) .text-white         { color: #111111 !important; }
   animation: ticker-scroll 40s linear infinite;
 }
 
-/* ── LED pulse dot ────────────────────────────────────────────── */
-@keyframes led-pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 4px currentColor; }
-  50%       { opacity: 0.4; box-shadow: none; }
-}
-.led-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  animation: led-pulse 2s ease-in-out infinite;
-}
-.led-dot.green  { background: #00A651; color: #00A651; }
-.led-dot.red    { background: #E8002D; color: #E8002D; }
-.led-dot.yellow { background: #FFF200; color: #FFF200; }
-.led-dot.dim    { background: #444444; color: #444444; animation: none; }
+/* ══════════════════════════════════════════════════════════════════
+   TRACK STATUS BANNERS
+══════════════════════════════════════════════════════════════════ */
+.status-banner-green   { background: #00A651; color: #000; }
+.status-banner-yellow  { background: #FFF200; color: #000; }
+.status-banner-red     { background: #E8002D; color: #fff; }
+.status-banner-orange  { background: #FFA500; color: #000; }
 
-/* ── Countdown digits ─────────────────────────────────────────── */
-.countdown-unit {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 2.5rem;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  color: #E5E5E5;
-}
-.countdown-label {
-  font-family: 'Barlow Condensed', sans-serif;
-  font-size: 10px;
-  letter-spacing: 0.15em;
-  color: #444444;
-  text-transform: uppercase;
-  text-align: center;
-}
-
-/* ── Hover row highlight ──────────────────────────────────────── */
-.driver-row:hover {
-  background-color: #161616 !important;
-}
-
-/* ── Points bar ───────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   POINTS BAR
+══════════════════════════════════════════════════════════════════ */
 .points-bar-fill {
   height: 2px;
   border-radius: 1px;
   transition: width 0.6s ease;
 }
 
-/* ── Custom scrollbar ─────────────────────────────────────────── */
-::-webkit-scrollbar        { width: 4px; height: 4px; }
-::-webkit-scrollbar-track  { background: #0A0A0A; }
-::-webkit-scrollbar-thumb  { background: #222222; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #333333; }
-
-/* ── Track status banner ──────────────────────────────────────── */
-.status-banner-green   { background: #00A651; color: #000; }
-.status-banner-yellow  { background: #FFF200; color: #000; }
-.status-banner-red     { background: #E8002D; color: #fff; }
-.status-banner-orange  { background: #FFA500; color: #000; }
-
-/* ── Recharts overrides ───────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   RECHARTS OVERRIDES
+══════════════════════════════════════════════════════════════════ */
 .recharts-cartesian-grid-horizontal line,
 .recharts-cartesian-grid-vertical line {
-  stroke: #1a1a1a;
+  stroke: var(--pw-border);
 }
 .recharts-text, .recharts-legend-item-text {
-  fill: #888888 !important;
+  fill: var(--pw-ghost) !important;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   DRIVER ROW HOVER
+══════════════════════════════════════════════════════════════════ */
+.driver-row:hover {
+  background-color: var(--pw-surface) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LAP TIME (deleted)
+══════════════════════════════════════════════════════════════════ */
+.lap-deleted {
+  text-decoration: line-through;
+  opacity: 0.4;
 }

@@ -1,35 +1,26 @@
 /**
- * TrackMap.jsx
- * Renders an F1 circuit layout from GeoJSON (bacinger/f1-circuits format).
- * Falls back to a styled stats card if GeoJSON is unavailable.
- *
- * Props:
- *   circuitData  — entry from circuits.json (has .svg slug, .laps, .length_km etc.)
- *   compact      — smaller height (for sidebars / home page)
- *   showStats    — whether to show stat chips + lap record below map
+ * TrackMap.jsx — PITWALL
+ * Renders an F1 circuit layout from GeoJSON.
+ * Transparent canvas bg that blends with page theme.
+ * Stats shown as a clean row below the map.
+ * Lap record shown as inline label + value (full width, readable).
  */
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 
-// Country → flag emoji
 const FLAGS = {
   Australia: '🇦🇺', China: '🇨🇳', Japan: '🇯🇵', Bahrain: '🇧🇭',
   'Saudi Arabia': '🇸🇦', USA: '🇺🇸', Canada: '🇨🇦', Monaco: '🇲🇨',
   Spain: '🇪🇸', Austria: '🇦🇹', 'Great Britain': '🇬🇧', Belgium: '🇧🇪',
   Hungary: '🇭🇺', Netherlands: '🇳🇱', Italy: '🇮🇹', Azerbaijan: '🇦🇿',
-  Singapore: '🇸🇬', Mexico: '🇲🇽', Brazil: '🇧🇷', Qatar: '🇶🇦',
-  UAE: '🇦🇪',
+  Singapore: '🇸🇬', Mexico: '🇲🇽', Brazil: '🇧🇷', Qatar: '🇶🇦', UAE: '🇦🇪',
 }
 
-// ── GeoJSON → canvas renderer ─────────────────────────────────────────────────
-function renderCircuit(canvas, coordinates, containerW, containerH) {
-  if (!canvas || !coordinates?.length) return
+// ── Canvas renderer ───────────────────────────────────────────────────────────
+function renderCircuit(canvas, coordinates, W, H) {
+  if (!canvas || !coordinates?.length || !W || !H) return
 
   const dpr = window.devicePixelRatio || 1
-  const W   = containerW  || canvas.parentElement?.offsetWidth  || 300
-  const H   = containerH  || canvas.parentElement?.offsetHeight || 200
-
-  // Set canvas pixel dimensions explicitly
   canvas.width  = W * dpr
   canvas.height = H * dpr
 
@@ -37,163 +28,137 @@ function renderCircuit(canvas, coordinates, containerW, containerH) {
   ctx.scale(dpr, dpr)
   ctx.clearRect(0, 0, W, H)
 
-  // Flatten coordinates
   const pts = Array.isArray(coordinates[0]) ? coordinates : coordinates.flat(Infinity)
   if (!pts.length) return
 
   const lngs = pts.map((p) => p[0])
   const lats  = pts.map((p) => p[1])
-
   const minLng = Math.min(...lngs), maxLng = Math.max(...lngs)
   const minLat = Math.min(...lats), maxLat = Math.max(...lats)
 
-  const pad  = 0.1
+  const pad  = 0.12
   const dLng = (maxLng - minLng) || 0.001
   const dLat = (maxLat - minLat) || 0.001
 
   const toX = (lng) => (((lng - minLng) / dLng) * (1 - 2 * pad) + pad) * W
-  // lat increases upward in geo, canvas y goes downward
   const toY = (lat) => ((1 - (lat - minLat) / dLat) * (1 - 2 * pad) + pad) * H
 
-  // Outer thick stroke (background glow)
-  ctx.shadowColor = 'rgba(220, 0, 0, 0.4)'
-  ctx.shadowBlur  = 10
-  ctx.beginPath()
-  ctx.moveTo(toX(pts[0][0]), toY(pts[0][1]))
-  for (let i = 1; i < pts.length; i++) {
-    ctx.lineTo(toX(pts[i][0]), toY(pts[i][1]))
+  const drawPath = () => {
+    ctx.beginPath()
+    ctx.moveTo(toX(pts[0][0]), toY(pts[0][1]))
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(toX(pts[i][0]), toY(pts[i][1]))
+    ctx.closePath()
   }
-  ctx.closePath()
-  ctx.strokeStyle = '#2a0000'
-  ctx.lineWidth   = 7
-  ctx.lineJoin    = 'round'
-  ctx.lineCap     = 'round'
-  ctx.stroke()
 
-  // Inner bright red line
-  ctx.shadowBlur  = 0
-  ctx.beginPath()
-  ctx.moveTo(toX(pts[0][0]), toY(pts[0][1]))
-  for (let i = 1; i < pts.length; i++) {
-    ctx.lineTo(toX(pts[i][0]), toY(pts[i][1]))
-  }
-  ctx.closePath()
+  // Outer glow
+  ctx.save()
+  ctx.shadowColor = 'rgba(225, 6, 0, 0.5)'
+  ctx.shadowBlur  = 14
+  drawPath()
+  ctx.strokeStyle = '#6b0000'
+  ctx.lineWidth   = 8
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round'
+  ctx.stroke()
+  ctx.restore()
+
+  // Main red line
+  drawPath()
   ctx.strokeStyle = '#e10600'
-  ctx.lineWidth   = 2.5
+  ctx.lineWidth   = 3
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round'
   ctx.stroke()
 
-  // Thin white highlight on top
-  ctx.globalAlpha = 0.15
-  ctx.beginPath()
-  ctx.moveTo(toX(pts[0][0]), toY(pts[0][1]))
-  for (let i = 1; i < pts.length; i++) {
-    ctx.lineTo(toX(pts[i][0]), toY(pts[i][1]))
-  }
-  ctx.closePath()
-  ctx.strokeStyle = '#ffffff'
+  // Thin bright highlight
+  ctx.globalAlpha = 0.25
+  drawPath()
+  ctx.strokeStyle = '#ff6b6b'
   ctx.lineWidth   = 1
   ctx.stroke()
   ctx.globalAlpha = 1
 }
 
-// ── Stat chip ─────────────────────────────────────────────────────────────────
-function StatChip({ label, value }) {
+// ── Stat item ─────────────────────────────────────────────────────────────────
+function StatItem({ label, value }) {
   if (!value) return null
   return (
-    <div className="flex flex-col items-center px-3 py-1.5 bg-[#0d0d0d] border border-pitwall-border">
-      <span className="font-mono text-[9px] text-pitwall-ghost tracking-widest uppercase">{label}</span>
-      <span className="font-mono text-xs text-pitwall-text mt-0.5">{value}</span>
+    <div className="flex flex-col items-center gap-0.5 flex-1">
+      <span className="font-mono text-[10px] tracking-widest uppercase"
+        style={{ color: 'var(--pw-ghost)' }}>{label}</span>
+      <span className="font-mono text-sm font-semibold"
+        style={{ color: 'var(--pw-text)' }}>{value}</span>
     </div>
   )
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function TrackMap({ circuitData, compact = false, showStats = true }) {
-  const canvasRef     = useRef(null)
-  const containerRef  = useRef(null)
+  const canvasRef    = useRef(null)
+  const containerRef = useRef(null)
   const [loading, setLoading] = useState(false)
   const [failed,  setFailed]  = useState(false)
   const [coords,  setCoords]  = useState(null)
 
   const slug = circuitData?.svg
 
-  // Fetch GeoJSON whenever slug changes
   useEffect(() => {
-    setLoading(true)
-    setFailed(false)
-    setCoords(null)
-
+    setLoading(true); setFailed(false); setCoords(null)
     if (!slug) { setFailed(true); setLoading(false); return }
 
     let cancelled = false
     fetch(`/trackmaps/${slug}.geojson`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then((geo) => {
         if (cancelled) return
-        // GeoJSON feature collection → extract first LineString / Polygon / MultiLineString
         let pts = null
         const features = geo.features ?? (geo.type === 'Feature' ? [geo] : [])
         for (const f of features) {
-          const geom = f.geometry
-          if (!geom) continue
-          if (geom.type === 'LineString')      { pts = geom.coordinates; break }
-          if (geom.type === 'Polygon')         { pts = geom.coordinates[0]; break }
-          if (geom.type === 'MultiLineString') { pts = geom.coordinates.flat(1); break }
+          const g = f.geometry; if (!g) continue
+          if (g.type === 'LineString')      { pts = g.coordinates; break }
+          if (g.type === 'Polygon')         { pts = g.coordinates[0]; break }
+          if (g.type === 'MultiLineString') { pts = g.coordinates.flat(1); break }
         }
-        if (!pts?.length) throw new Error('no coordinates')
-        setCoords(pts)
-        setLoading(false)
+        if (!pts?.length) throw new Error('no coords')
+        setCoords(pts); setLoading(false)
       })
-      .catch(() => {
-        if (!cancelled) { setFailed(true); setLoading(false) }
-      })
-
+      .catch(() => { if (!cancelled) { setFailed(true); setLoading(false) } })
     return () => { cancelled = true }
   }, [slug])
 
-  // Draw function — needs measured container dimensions
   const draw = useCallback(() => {
     if (!canvasRef.current || !coords || !containerRef.current) return
-    const el  = containerRef.current
-    const W   = el.offsetWidth
-    const H   = el.offsetHeight
-    if (W === 0 || H === 0) return
+    const { offsetWidth: W, offsetHeight: H } = containerRef.current
+    if (!W || !H) return
     renderCircuit(canvasRef.current, coords, W, H)
   }, [coords])
 
-  // useLayoutEffect fires AFTER the DOM is painted, so offsetWidth/Height are real
-  useLayoutEffect(() => {
-    draw()
-  }, [draw])
+  useLayoutEffect(() => { draw() }, [draw])
 
-  // ResizeObserver ensures re-draw on container size changes
   useEffect(() => {
     if (!containerRef.current) return
-    const obs = new ResizeObserver(() => {
-      if (coords) draw()
-    })
+    const obs = new ResizeObserver(() => { if (coords) draw() })
     obs.observe(containerRef.current)
     return () => obs.disconnect()
   }, [coords, draw])
 
   const flag    = FLAGS[circuitData?.country] ?? '🏁'
   const raceLen = circuitData
-    ? ((circuitData.laps ?? 0) * (circuitData.length_km ?? 0)).toFixed(2)
+    ? ((circuitData.laps ?? 0) * (circuitData.length_km ?? 0)).toFixed(1)
     : null
 
-  const mapHeight = compact ? 140 : 220
+  const mapH = compact ? 140 : 200
 
   return (
-    <div className="w-full flex flex-col gap-2">
+    <div className="w-full flex flex-col gap-0">
 
-      {/* ── Track canvas / fallback ──────────────────────────── */}
+      {/* ── Canvas ─────────────────────────────────────────────── */}
       <div
         ref={containerRef}
-        className="w-full border border-pitwall-border bg-[#090909] relative overflow-hidden"
-        style={{ height: mapHeight }}
+        className="w-full relative overflow-hidden rounded-sm"
+        style={{
+          height: mapH,
+          background: 'transparent',
+          border: '1px solid var(--pw-border)',
+        }}
       >
         {!failed && !loading && coords ? (
           <canvas
@@ -202,53 +167,90 @@ export default function TrackMap({ circuitData, compact = false, showStats = tru
           />
         ) : loading ? (
           <div className="w-full h-full flex items-center justify-center">
-            <div className="w-16 h-16 rounded-full border border-pitwall-border animate-pulse bg-[#111]" />
+            <div className="w-12 h-12 rounded-full border border-pitwall-border animate-pulse"
+              style={{ background: 'var(--pw-surface)' }} />
           </div>
         ) : (
-          /* Fallback — flag + name card */
-          <div className="flex flex-col items-center justify-center w-full h-full gap-2 px-4 text-center">
+          <div className="flex flex-col items-center justify-center w-full h-full gap-2">
             <span className="text-4xl">{flag}</span>
-            <span className="font-display font-bold text-xs text-pitwall-text tracking-widest uppercase leading-tight">
-              {circuitData?.circuit ?? 'Circuit unavailable'}
+            <span className="font-display font-bold text-xs tracking-widest uppercase"
+              style={{ color: 'var(--pw-text)' }}>
+              {circuitData?.circuit ?? 'Track map unavailable'}
             </span>
-            {circuitData?.length_km && (
-              <span className="font-mono text-[10px] text-pitwall-ghost">
-                {circuitData.length_km} km · {circuitData.laps} laps
-              </span>
-            )}
           </div>
         )}
 
-        {/* Circuit name overlay (bottom left when map loaded) */}
+        {/* Circuit city name overlay */}
         {!failed && !loading && coords && (
-          <div className="absolute bottom-1.5 left-2 font-mono text-[9px] text-pitwall-ghost/60 tracking-widest uppercase">
-            {circuitData?.city ?? circuitData?.circuit ?? ''}
+          <div className="absolute bottom-1.5 left-2 font-mono text-[9px] tracking-widest uppercase"
+            style={{ color: 'var(--pw-ghost)' }}>
+            {circuitData?.city ?? ''}
           </div>
         )}
       </div>
 
-      {/* ── Stats chips ─────────────────────────────────────── */}
+      {/* ── Stats row ──────────────────────────────────────────── */}
       {showStats && circuitData && (
-        <div className="grid grid-cols-4 gap-1">
-          <StatChip label="Laps"   value={circuitData.laps} />
-          <StatChip label="Length" value={`${circuitData.length_km} km`} />
-          <StatChip label="Turns"  value={circuitData.turns ?? circuitData.corners ?? '—'} />
-          <StatChip label="Dist."  value={raceLen ? `${raceLen} km` : null} />
+        <div
+          className="flex items-center divide-x"
+          style={{
+            borderLeft: '1px solid var(--pw-border)',
+            borderRight: '1px solid var(--pw-border)',
+            borderBottom: '1px solid var(--pw-border)',
+            divideColor: 'var(--pw-border)',
+            background: 'var(--pw-surface)',
+          }}
+        >
+          {[
+            { label: 'Laps',   value: circuitData.laps },
+            { label: 'Length', value: circuitData.length_km ? `${circuitData.length_km} km` : null },
+            { label: 'Turns',  value: circuitData.turns ?? circuitData.corners ?? null },
+            { label: 'Dist.',  value: raceLen ? `${raceLen} km` : null },
+          ].map(({ label, value }) =>
+            value != null ? (
+              <div
+                key={label}
+                className="flex flex-col items-center gap-0.5 flex-1 py-2 px-1"
+                style={{ borderRight: '1px solid var(--pw-border)' }}
+              >
+                <span className="font-mono text-[9px] tracking-widest uppercase"
+                  style={{ color: 'var(--pw-ghost)' }}>{label}</span>
+                <span className="font-mono text-sm font-bold"
+                  style={{ color: 'var(--pw-text-strong)' }}>{value}</span>
+              </div>
+            ) : null
+          )}
         </div>
       )}
 
-      {/* ── Lap record ──────────────────────────────────────── */}
+      {/* ── Lap record ─────────────────────────────────────────── */}
       {showStats && circuitData?.lap_record && (
-        <div className="px-3 py-2 bg-[#0d0d0d] border border-pitwall-border flex items-center justify-between gap-2">
-          <span className="font-mono text-[9px] text-pitwall-ghost tracking-widest uppercase">
+        <div
+          className="flex items-center justify-between gap-4 px-3 py-2"
+          style={{
+            background: 'var(--pw-surface)',
+            border: '1px solid var(--pw-border)',
+            borderTop: 'none',
+          }}
+        >
+          <span className="font-mono text-[9px] tracking-widest uppercase flex-shrink-0"
+            style={{ color: 'var(--pw-ghost)' }}>
             Lap Record
           </span>
-          <span className="font-mono text-xs text-pitwall-text">
-            {circuitData.lap_record}
-            <span className="text-pitwall-ghost ml-1.5">
-              {circuitData.lap_record_holder} ({circuitData.lap_record_year})
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-mono text-sm font-bold flex-shrink-0"
+              style={{ color: '#e10600' }}>
+              {circuitData.lap_record}
             </span>
-          </span>
+            <span className="font-mono text-xs truncate"
+              style={{ color: 'var(--pw-dim)' }}>
+              {circuitData.lap_record_holder}
+            </span>
+            <span className="font-mono text-[10px] flex-shrink-0"
+              style={{ color: 'var(--pw-ghost)' }}>
+              ({circuitData.lap_record_year})
+            </span>
+          </div>
         </div>
       )}
     </div>
