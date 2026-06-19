@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import useF1Store from '../store/useF1Store'
 import useRaceWeekendState from '../hooks/useRaceWeekendState'
+import { useOpenF1Stints, useOpenF1Status } from '../hooks/useOpenF1'
 import DriverRow from '../components/ui/DriverRow'
 import TrackStatusBanner from '../components/ui/TrackStatusBanner'
 import TrackMap from '../components/ui/TrackMap'
@@ -273,6 +274,11 @@ export default function Live() {
   const weekendState = useRaceWeekendState()
   const isLive = weekendState.mode === 'SESSION_LIVE'
 
+  // OpenF1 — stints enrich tyre data with compound + age
+  const sessionKey = useF1Store((s) => s.currentSessionKey)
+  const { stints: openf1Stints } = useOpenF1Stints(isLive ? sessionKey : null)
+  const { hasKey: openf1HasKey } = useOpenF1Status()
+
   // Memoised derived data
   const sortedTiming = useMemo(() =>
     [...timing].sort((a, b) => {
@@ -283,10 +289,36 @@ export default function Live() {
     [timing]
   )
 
-  const tyresByDriver = useMemo(
-    () => Object.fromEntries(tyres.map((t) => [t.driver_number ?? t.number, t])),
-    [tyres]
-  )
+  // tyresByDriver: merge SignalR tyre data with OpenF1 stint data
+  const tyresByDriver = useMemo(() => {
+    // Build base from SignalR
+    const base = Object.fromEntries(tyres.map((t) => [t.driver_number ?? t.number, t]))
+
+    // Enrich with OpenF1 stints (most recent stint per driver)
+    if (openf1Stints.length > 0) {
+      const latestStint = {}
+      for (const s of openf1Stints) {
+        const num = s.driver_number
+        if (!latestStint[num] || s.stint_number > latestStint[num].stint_number) {
+          latestStint[num] = s
+        }
+      }
+      for (const [num, stint] of Object.entries(latestStint)) {
+        const existing = base[num] ?? {}
+        // OpenF1 compound names: SOFT, MEDIUM, HARD, INTERMEDIATE, WET
+        base[num] = {
+          ...existing,
+          compound: stint.compound ?? existing.compound,
+          // age = current lap (from session) minus lap_start of stint
+          age: stint.lap_end != null
+            ? (stint.lap_end - (stint.lap_start ?? 1) + 1)
+            : existing.age,
+          is_new: stint.stint_number === 1,
+        }
+      }
+    }
+    return base
+  }, [tyres, openf1Stints])
 
   const driversByNumber = useMemo(
     () => Object.fromEntries(drivers.map((d) => [d.number, d])),
@@ -354,10 +386,10 @@ export default function Live() {
     : weekendState.nextSession?.label ?? 'UPCOMING'
 
   return (
-    <div className="h-full flex flex-col bg-pitwall-bg">
+    <div className="h-full flex flex-col" style={{ background: 'var(--pw-bg)' }}>
 
       {/* Sub-tab bar */}
-      <div className="flex border-b border-pitwall-border bg-pitwall-surface">
+      <div className="flex border-b border-pitwall-border" style={{ background: 'var(--pw-surface)' }}>
         {TABS.map((tab) => (
           <button
             key={tab}
@@ -365,15 +397,21 @@ export default function Live() {
             aria-label={`Switch to ${tab} view`}
             className={`px-4 md:px-5 py-2 font-display text-xs tracking-widest uppercase transition-colors ${
               activeTab === tab
-                ? 'text-white border-b-2 border-status-red'
-                : 'text-pitwall-ghost hover:text-pitwall-dim border-b-2 border-transparent'
+                ? 'border-b-2 border-status-red'
+                : 'border-b-2 border-transparent'
             }`}
+            style={{ color: activeTab === tab ? 'var(--pw-text-strong)' : 'var(--pw-ghost)' }}
           >
             {tab}
           </button>
         ))}
-        <div className="ml-auto flex items-center px-4 font-mono text-xs text-pitwall-dim">
-          {session.clock ?? '—'}
+        <div className="ml-auto flex items-center gap-3 px-4">
+          {/* OpenF1 key status indicator */}
+          <div className="flex items-center gap-1" title={openf1HasKey ? 'OpenF1 connected' : 'OpenF1 key not set — add OPENF1_API_KEY to .env'}>
+            <span className={`w-1.5 h-1.5 rounded-full ${openf1HasKey ? 'bg-status-green' : 'bg-pitwall-ghost'}`} />
+            <span className="font-mono text-[10px]" style={{ color: 'var(--pw-ghost)' }}>OF1</span>
+          </div>
+          <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>{session.clock ?? '—'}</span>
         </div>
       </div>
 
@@ -388,11 +426,13 @@ export default function Live() {
           <div className="flex flex-col border-b lg:border-b-0 lg:border-r border-pitwall-border overflow-hidden w-full lg:w-[58%]">
 
             {/* Session header */}
-            <div className="flex items-center justify-between px-4 py-2 border-b border-pitwall-border bg-[#0d0d0d]">
-              <span className="font-display font-semibold text-sm tracking-wider text-pitwall-text uppercase">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-pitwall-border"
+              style={{ background: 'var(--pw-surface)' }}>
+              <span className="font-display font-semibold text-sm tracking-wider uppercase"
+                style={{ color: 'var(--pw-text)' }}>
                 {sessionHeaderTitle}
               </span>
-              <span className="font-mono text-xs text-pitwall-dim">
+              <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>
                 {sessionHeaderRight}
               </span>
             </div>
@@ -440,9 +480,11 @@ export default function Live() {
 
           {/* Right panel — track map + weather/schedule */}
           <div className="hidden lg:flex flex-col overflow-hidden" style={{ width: '42%' }}>
-            <div className="flex-1 border-b border-pitwall-border bg-[#0a0a0a] overflow-hidden">
-              <div className="px-4 pt-3 pb-1 border-b border-[#111]">
-                <span className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase">
+            <div className="flex-1 border-b border-pitwall-border overflow-hidden"
+              style={{ background: 'var(--pw-surface)' }}>
+              <div className="px-4 pt-3 pb-1 border-b border-pitwall-border">
+                <span className="font-mono text-[10px] tracking-widest uppercase"
+                  style={{ color: 'var(--pw-ghost)' }}>
                   {isLive ? 'Track Map' : 'Circuit'}
                 </span>
               </div>

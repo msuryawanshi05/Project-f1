@@ -21,7 +21,7 @@ from datetime import date
 import requests as req_sync
 
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from db import cache_get_all, cache_set, init_db
@@ -183,6 +183,50 @@ async def current_session():
         "source":       "openf1",
     }
 
+
+
+@app.get("/api/openf1/status")
+async def openf1_status():
+    """
+    Returns whether an OpenF1 API key is configured.
+    Frontend uses this to know if OpenF1 endpoints will work.
+    """
+    api_key = os.getenv("OPENF1_API_KEY", "").strip()
+    return {"has_key": bool(api_key)}
+
+
+@app.get("/api/openf1/{path:path}")
+async def openf1_proxy(path: str, request: Request):
+    """
+    Transparent proxy for OpenF1 API — injects API key server-side.
+    Frontend calls: GET /api/openf1/v1/stints?session_key=123
+    Backend calls:  GET https://api.openf1.org/v1/stints?session_key=123
+                    with X-Api-Key header injected.
+    """
+    from starlette.responses import Response
+
+    api_key = os.getenv("OPENF1_API_KEY", "").strip()
+    headers = {"X-Api-Key": api_key} if api_key else {}
+
+    # Forward all query params from the original request
+    params = dict(request.query_params)
+    url = f"https://api.openf1.org/{path}"
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.get(url, params=params, headers=headers)
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                media_type=resp.headers.get("content-type", "application/json"),
+            )
+        except Exception as exc:
+            logger.warning("OpenF1 proxy error: %s", exc)
+            return Response(
+                content=json.dumps({"error": str(exc)}),
+                status_code=502,
+                media_type="application/json",
+            )
 
 
 @app.websocket("/ws")
