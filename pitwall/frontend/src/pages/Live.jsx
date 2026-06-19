@@ -32,12 +32,15 @@ function useCountdown(targetDt) {
   return diff
 }
 
-// ── Weather tile ──────────────────────────────────────────────────────────────
+// ── Weather tile ───────────────────────────────────────────────────────────────────
 function WeatherTile({ label, value, accent = false }) {
   return (
-    <div className="bg-[#0d0d0d] border border-pitwall-border p-3 flex flex-col gap-1">
-      <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase">{label}</div>
-      <div className={`font-mono text-lg font-medium ${accent ? 'text-status-green' : 'text-pitwall-text'}`}>
+    <div className="border border-pitwall-border p-3 flex flex-col gap-1"
+      style={{ background: 'var(--pw-surface)' }}>
+      <div className="font-mono text-[10px] tracking-widest uppercase"
+        style={{ color: 'var(--pw-ghost)' }}>{label}</div>
+      <div className="font-mono text-lg font-medium"
+        style={{ color: accent ? 'var(--pw-green)' : 'var(--pw-text-strong)' }}>
         {value ?? '—'}
       </div>
     </div>
@@ -125,8 +128,10 @@ function WeekendPanel({ weekendState, weather }) {
 
       {/* Countdown to next session */}
       {nextSession && (
-        <div className="mx-4 mb-3 px-3 py-2.5 bg-[#0d0d0d] border border-pitwall-border">
-          <div className="font-mono text-[9px] text-pitwall-ghost tracking-widest uppercase mb-1">
+        <div className="mx-4 mb-3 px-3 py-2.5 border border-pitwall-border"
+          style={{ background: 'var(--pw-surface)' }}>
+          <div className="font-mono text-[9px] tracking-widest uppercase mb-1"
+            style={{ color: 'var(--pw-ghost)' }}>
             Next Session
           </div>
           <div className="flex items-center justify-between">
@@ -175,10 +180,12 @@ function TowerEmptyState({ weekendState }) {
         )}
         {nextSession && countdown && (
           <div className="flex flex-col items-center gap-1 mt-2">
-            <div className="font-mono text-[10px] text-pitwall-ghost uppercase tracking-widest">
+            <div className="font-mono text-[10px] uppercase tracking-widest"
+              style={{ color: 'var(--pw-ghost)' }}>
               {nextSession.label} starts in
             </div>
-            <div className="font-mono text-2xl text-white tabular-nums">
+            <div className="font-mono text-2xl tabular-nums"
+              style={{ color: 'var(--pw-text-strong)' }}>
               {String(countdown.h).padStart(2, '0')}:{String(countdown.m).padStart(2, '00')}:{String(countdown.s).padStart(2, '00')}
             </div>
           </div>

@@ -69,16 +69,12 @@ function Countdown({ targetDate }) {
   }, [targetDate])
 
   if (!diff) return null
-  if (diff.d > 0) {
-    return (
-      <span className="font-mono text-xs text-pitwall-dim tracking-wide">
-        {diff.d}D {String(diff.h).padStart(2, '0')}H {String(diff.m).padStart(2, '0')}M {String(diff.s).padStart(2, '0')}S
-      </span>
-    )
-  }
+  const parts = diff.d > 0
+    ? `${diff.d}D ${String(diff.h).padStart(2,'0')}H ${String(diff.m).padStart(2,'0')}M ${String(diff.s).padStart(2,'0')}S`
+    : `${String(diff.h).padStart(2,'0')}H ${String(diff.m).padStart(2,'0')}M ${String(diff.s).padStart(2,'0')}S`
   return (
-    <span className="font-mono text-xs text-pitwall-dim tracking-wide">
-      {String(diff.h).padStart(2, '0')}H {String(diff.m).padStart(2, '0')}M {String(diff.s).padStart(2, '0')}S
+    <span className="font-mono text-xs tracking-wide" style={{ color: 'var(--pw-dim)' }}>
+      {parts}
     </span>
   )
 }
@@ -105,13 +101,17 @@ export default function AppShell({ children, wsConnected }) {
     : ''
 
   return (
-    <div className="flex flex-col min-h-screen bg-pitwall-bg">
+    <div className="flex flex-col min-h-screen" style={{ background: 'var(--pw-bg)' }}>
       {/* ── Top bar ────────────────────────────────────────────── */}
-      <header className="fixed top-0 left-0 right-0 z-50 h-12 bg-pitwall-surface border-b border-pitwall-border flex items-center px-4 gap-4">
+      <header
+        className="fixed top-0 left-0 right-0 z-50 h-12 border-b flex items-center px-4 gap-4"
+        style={{ background: 'var(--pw-surface)', borderColor: 'var(--pw-border)' }}
+      >
         {/* Logo */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <span className="w-2 h-2 rounded-full bg-status-red" />
-          <span className="font-display font-bold text-xl tracking-widest text-white uppercase">
+          <span className="font-display font-bold text-xl tracking-widest uppercase"
+            style={{ color: 'var(--pw-text-strong)' }}>
             PITWALL
           </span>
         </div>
@@ -124,7 +124,7 @@ export default function AppShell({ children, wsConnected }) {
               <span className="font-display text-sm font-bold tracking-wider text-status-red uppercase px-2 py-0.5 bg-status-red/20 border border-status-red/30">
                 LIVE
               </span>
-              <span className="font-mono text-sm text-white">
+              <span className="font-mono text-sm" style={{ color: 'var(--pw-text-strong)' }}>
                 {session.name ?? 'SESSION'} — LAP {session.lap ?? '—'}/{session.total_laps ?? '—'}
               </span>
               {ts.severity !== 'green' && (
@@ -141,11 +141,13 @@ export default function AppShell({ children, wsConnected }) {
                   TODAY
                 </span>
               ) : nextSession.isTomorrow ? (
-                <span className="font-mono text-[10px] text-[#888] border border-[#333] px-1.5 py-0.5 tracking-widest">
+                <span className="font-mono text-[10px] border px-1.5 py-0.5 tracking-widest"
+                  style={{ color: 'var(--pw-dim)', borderColor: 'var(--pw-muted)' }}>
                   TOMORROW
                 </span>
               ) : null}
-              <span className="font-display text-sm tracking-wider text-pitwall-dim uppercase">
+              <span className="font-display text-sm tracking-wider uppercase"
+                style={{ color: 'var(--pw-dim)' }}>
                 {nextSession.label}
               </span>
               <Countdown targetDate={nextSession.targetDt} />
@@ -153,7 +155,8 @@ export default function AppShell({ children, wsConnected }) {
           ) : (
             <>
               <span className="led-dot dim" />
-              <span className="font-display text-sm tracking-wider text-pitwall-dim uppercase">
+              <span className="font-display text-sm tracking-wider uppercase"
+                style={{ color: 'var(--pw-ghost)' }}>
                 OFF SEASON
               </span>
             </>
@@ -163,14 +166,17 @@ export default function AppShell({ children, wsConnected }) {
         {/* Right — WS connection */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <span className={`led-dot ${wsConnected ? 'green' : 'dim'}`} />
-          <span className="font-mono text-xs text-pitwall-dim">
+          <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>
             {wsConnected ? 'connected' : 'offline'}
           </span>
         </div>
       </header>
 
       {/* ── Nav tabs ───────────────────────────────────────────── */}
-      <nav className="fixed top-12 left-0 right-0 z-40 h-9 bg-pitwall-surface border-b border-pitwall-border flex items-center px-4">
+      <nav
+        className="fixed top-12 left-0 right-0 z-40 h-9 border-b flex items-center px-4"
+        style={{ background: 'var(--pw-surface)', borderColor: 'var(--pw-border)' }}
+      >
         {NAV.map(({ to, label }) => (
           <NavLink
             key={to}
@@ -179,10 +185,13 @@ export default function AppShell({ children, wsConnected }) {
             className={({ isActive }) =>
               `flex items-center h-full px-4 font-display text-xs tracking-widest uppercase transition-colors ${
                 isActive
-                  ? 'text-white border-b-2 border-status-red'
-                  : 'text-pitwall-dim hover:text-pitwall-text border-b-2 border-transparent'
+                  ? 'border-b-2 border-status-red'
+                  : 'border-b-2 border-transparent'
               }`
             }
+            style={({ isActive }) => ({
+              color: isActive ? 'var(--pw-text-strong)' : 'var(--pw-ghost)',
+            })}
           >
             {label}
           </NavLink>
@@ -190,7 +199,7 @@ export default function AppShell({ children, wsConnected }) {
       </nav>
 
       {/* ── Main content (offset for 48px header + 36px nav = 84px) */}
-      <main className="flex-1 mt-[84px] mb-7 overflow-auto">
+      <main className="flex-1 mt-[84px] mb-7 overflow-auto" style={{ background: 'var(--pw-bg)' }}>
         {children}
       </main>
 

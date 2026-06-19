@@ -11,11 +11,11 @@ function getTeamColourByName(teamName) {
   )?.[1] ?? '#444444'
 }
 
-// ── Points bar ────────────────────────────────────────────────────────────────
+// ── Points bar ─────────────────────────────────────────────────────────────────
 function PointsBar({ points, max, colour }) {
   const pct = max > 0 ? Math.round((parseFloat(points) / max) * 100) : 0
   return (
-    <div className="w-full h-0.5 bg-pitwall-muted mt-1">
+    <div className="w-full h-0.5 mt-1" style={{ background: 'var(--pw-border)' }}>
       <div
         className="h-full transition-all duration-700"
         style={{ width: `${pct}%`, backgroundColor: colour }}
@@ -47,8 +47,9 @@ function DriverStandingRow({ entry, maxPts, isLeader, isFav, teamColour }) {
 
       {/* Code + name */}
       <div className="flex-1 min-w-0">
-        <span className="font-mono font-medium text-sm text-white mr-2">{code}</span>
-        <span className="font-body text-xs text-pitwall-dim">{d.familyName}</span>
+        <span className="font-mono font-medium text-sm mr-2"
+          style={{ color: 'var(--pw-text-strong)' }}>{code}</span>
+        <span className="font-body text-xs" style={{ color: 'var(--pw-dim)' }}>{d.familyName}</span>
         <PointsBar points={pts} max={p1Pts} colour={teamColour} />
       </div>
 

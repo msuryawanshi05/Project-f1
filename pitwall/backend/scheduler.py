@@ -1,9 +1,10 @@
 """
 scheduler.py — PITWALL session scheduler.
 
-Reads the 2026 F1 calendar from frontend/src/data/circuits.json,
-schedules the SignalR client to start 5 minutes before each session,
-and schedules cache_clear() 3 hours after session start.
+Reads EXACT session times from the Jolpica calendar (fetched from the
+frontend store's calendar data or direct API call) and schedules SignalR
+client to start 5 minutes before each individual session (FP1, FP2, FP3,
+Qualifying, Sprint, Race).
 
 Called from main.py lifespan on startup.
 """
@@ -12,6 +13,9 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
+
+import httpx
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
@@ -21,23 +25,17 @@ from signalr_client import get_client
 
 logger = logging.getLogger(__name__)
 
-# Path to the 2026 calendar file created in Phase 2
 CIRCUITS_JSON = Path(__file__).parent.parent / "frontend" / "src" / "data" / "circuits.json"
-
-# Typical session schedule relative to race date (UTC offsets will vary)
-# We use Jolpica for exact times in Phase 4; here we approximate with race day
-_SESSION_OFFSETS_HOURS = {
-    "practice_1": -26,   # ~2 days before race (~Fri)
-    "practice_2": -22,
-    "practice_3": -2,    # ~Sat
-    "qualifying": 1,
-    "race":       24,    # race day Sun, roughly
-}
 
 _scheduler: BackgroundScheduler | None = None
 _loop_ref: asyncio.AbstractEventLoop | None = None
 _queue_ref: asyncio.Queue | None = None
 _client_running = False
+
+# How many minutes before session to start SignalR client
+START_LEAD_MINUTES = 10
+# How many hours after session start before stopping (max F1 session + delay)
+STOP_AFTER_HOURS   = 3
 
 
 def _start_signalr():
@@ -60,11 +58,144 @@ def _stop_and_clear():
         asyncio.run_coroutine_threadsafe(cache_clear(), _loop_ref)
 
 
-def _load_sessions() -> list[dict]:
+# ── Jolpica session extraction ─────────────────────────────────────────────────
+
+async def _fetch_jolpica_calendar(year: int) -> list[dict]:
+    """Fetch full calendar with exact session times from Jolpica API."""
+    url = f"https://api.jolpi.ca/ergast/f1/{year}.json"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("MRData", {}).get("RaceTable", {}).get("Races", [])
+    except Exception as exc:
+        logger.warning("Could not fetch Jolpica calendar: %s", exc)
+        return []
+
+
+def _extract_sessions_from_race(race: dict) -> list[dict]:
     """
-    Returns a list of {round, name, race_date_utc} dicts.
-    race_date_utc is a timezone-aware datetime parsed from circuits.json.
+    Given a Jolpica Race object, return list of {label, dt} for each session
+    that has an exact date + time provided.
     """
+    sessions = []
+    # FP1
+    if race.get("FirstPractice", {}).get("date"):
+        fp = race["FirstPractice"]
+        sessions.append(("FP1", fp["date"], fp.get("time", "11:00:00Z")))
+    # FP2
+    if race.get("SecondPractice", {}).get("date"):
+        fp = race["SecondPractice"]
+        sessions.append(("FP2", fp["date"], fp.get("time", "15:00:00Z")))
+    # FP3
+    if race.get("ThirdPractice", {}).get("date"):
+        fp = race["ThirdPractice"]
+        sessions.append(("FP3", fp["date"], fp.get("time", "12:00:00Z")))
+    # Sprint
+    if race.get("Sprint", {}).get("date"):
+        sp = race["Sprint"]
+        sessions.append(("Sprint", sp["date"], sp.get("time", "12:00:00Z")))
+    # Qualifying
+    if race.get("Qualifying", {}).get("date"):
+        q = race["Qualifying"]
+        sessions.append(("Qualifying", q["date"], q.get("time", "14:00:00Z")))
+    # Race
+    if race.get("date"):
+        sessions.append(("Race", race["date"], race.get("time", "13:00:00Z")))
+
+    result = []
+    for label, date_str, time_str in sessions:
+        try:
+            dt_str = f"{date_str}T{time_str}"
+            # Jolpica times end in 'Z' already
+            if not dt_str.endswith("Z") and "+" not in time_str:
+                dt_str += "Z"
+            dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+            result.append({"label": label, "dt": dt, "race": race.get("raceName", "")})
+        except ValueError as e:
+            logger.warning("Could not parse session time %s %s: %s", date_str, time_str, e)
+    return result
+
+
+def _is_any_session_live_now(sessions: list[dict]) -> bool:
+    """True if we're within 10 min before or 3 hours after any session start."""
+    now = datetime.now(timezone.utc)
+    for s in sessions:
+        delta_minutes = (now - s["dt"]).total_seconds() / 60
+        if -START_LEAD_MINUTES <= delta_minutes <= STOP_AFTER_HOURS * 60:
+            return True
+    return False
+
+
+def _schedule_sessions(sessions: list[dict]) -> int:
+    """Schedule start/stop jobs for all future sessions. Returns count scheduled."""
+    now = datetime.now(timezone.utc)
+    scheduled = 0
+    seen_starts: set = set()
+
+    for s in sessions:
+        start_dt = s["dt"] - timedelta(minutes=START_LEAD_MINUTES)
+        stop_dt  = s["dt"] + timedelta(hours=STOP_AFTER_HOURS)
+
+        if start_dt > now:
+            job_id = f"start_{s['race']}_{s['label']}"
+            if job_id not in seen_starts:
+                _scheduler.add_job(
+                    _start_signalr,
+                    trigger=DateTrigger(run_date=start_dt),
+                    id=job_id,
+                    misfire_grace_time=600,
+                    replace_existing=True,
+                )
+                _scheduler.add_job(
+                    _stop_and_clear,
+                    trigger=DateTrigger(run_date=stop_dt),
+                    id=f"stop_{s['race']}_{s['label']}",
+                    misfire_grace_time=600,
+                    replace_existing=True,
+                )
+                seen_starts.add(job_id)
+                scheduled += 1
+                logger.info(
+                    "Scheduled: %s %s — start at %s UTC",
+                    s["race"], s["label"], start_dt.strftime("%Y-%m-%d %H:%M"),
+                )
+    return scheduled
+
+
+async def _schedule_from_jolpica():
+    """
+    Async initialiser — fetches exact session times from Jolpica, then
+    schedules all future sessions. Falls back to circuits.json if API fails.
+    """
+    global _scheduler
+
+    year = datetime.now(timezone.utc).year
+    races = await _fetch_jolpica_calendar(year)
+
+    all_sessions: list[dict] = []
+    for race in races:
+        all_sessions.extend(_extract_sessions_from_race(race))
+
+    if not all_sessions:
+        logger.warning("Jolpica returned no sessions — falling back to circuits.json approximation")
+        all_sessions = _load_sessions_from_circuits_json()
+
+    logger.info("Scheduler: loaded %d sessions from Jolpica", len(all_sessions))
+    scheduled = _schedule_sessions(all_sessions)
+    logger.info("Scheduler: %d future sessions scheduled", scheduled)
+
+    # If we're currently in a live window, start immediately
+    if _is_any_session_live_now(all_sessions):
+        logger.info("Scheduler: live session detected on startup — starting SignalR now")
+        _start_signalr()
+    else:
+        logger.info("Scheduler: no live session right now — SignalR idle (will auto-start before sessions)")
+
+
+def _load_sessions_from_circuits_json() -> list[dict]:
+    """Fallback: load approximate times from circuits.json (race day only)."""
     sessions = []
     try:
         with open(CIRCUITS_JSON, encoding="utf-8") as f:
@@ -74,87 +205,38 @@ def _load_sessions() -> list[dict]:
             if not date_str:
                 continue
             try:
-                # Parse ISO date — assume UTC noon if no time given
                 if "T" in date_str:
                     dt = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
                 else:
-                    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(
-                        hour=12, tzinfo=timezone.utc
-                    )
+                    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=12, tzinfo=timezone.utc)
                 sessions.append({
-                    "round": circuit.get("round"),
-                    "name":  circuit.get("name", ""),
-                    "race_date_utc": dt,
-                    "sprint": circuit.get("sprint", False),
+                    "label": "Race (approx)",
+                    "dt": dt,
+                    "race": circuit.get("name", ""),
                 })
             except ValueError:
-                logger.warning("Could not parse date %r for %s", date_str, circuit.get('name'))
-    except FileNotFoundError:
-        logger.warning("circuits.json not found at %s", CIRCUITS_JSON)
-    except json.JSONDecodeError:
-        logger.exception("Could not parse circuits.json")
+                pass
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning("circuits.json fallback failed")
     return sessions
-
-
-def _is_session_live_now(sessions: list[dict]) -> bool:
-    """True if any race session started in the last 4 hours."""
-    now = datetime.now(timezone.utc)
-    for s in sessions:
-        race_dt = s["race_date_utc"]
-        delta = (now - race_dt).total_seconds() / 3600
-        if 0 <= delta <= 4:
-            return True
-    return False
 
 
 def start_scheduler(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue) -> None:
     """
     Entry point — called from main.py lifespan on startup.
-    Schedules SignalR start/stop jobs and, if a session is currently live,
-    starts the client immediately.
+    Uses Jolpica API for exact session times so FP1/FP2/Qualifying all get
+    their own start/stop jobs.
     """
     global _scheduler, _loop_ref, _queue_ref
     _loop_ref = loop
     _queue_ref = queue
 
-    sessions = _load_sessions()
-    logger.info("Scheduler: loaded %d rounds from circuits.json", len(sessions))
-
     _scheduler = BackgroundScheduler(timezone="UTC")
-
-    now = datetime.now(timezone.utc)
-    scheduled = 0
-
-    for s in sessions:
-        race_dt = s["race_date_utc"]
-        # Schedule start 5 min before the approximate race time
-        start_dt = race_dt - timedelta(minutes=5)
-        stop_dt  = race_dt + timedelta(hours=3)
-
-        if start_dt > now:
-            _scheduler.add_job(
-                _start_signalr,
-                trigger=DateTrigger(run_date=start_dt),
-                id=f"start_r{s['round']}",
-                misfire_grace_time=300,
-            )
-            _scheduler.add_job(
-                _stop_and_clear,
-                trigger=DateTrigger(run_date=stop_dt),
-                id=f"stop_r{s['round']}",
-                misfire_grace_time=300,
-            )
-            scheduled += 1
-
     _scheduler.start()
-    logger.info("Scheduler started — %d future sessions scheduled", scheduled)
 
-    # If we're currently in a live window, start immediately
-    if _is_session_live_now(sessions):
-        logger.info("Scheduler: live session detected on startup — starting SignalR now")
-        _start_signalr()
-    else:
-        logger.info("Scheduler: no live session — SignalR client idle (will auto-start)")
+    # Schedule async initialisation in the event loop
+    asyncio.run_coroutine_threadsafe(_schedule_from_jolpica(), loop)
+    logger.info("Scheduler started — awaiting Jolpica calendar fetch")
 
 
 def stop_scheduler() -> None:
