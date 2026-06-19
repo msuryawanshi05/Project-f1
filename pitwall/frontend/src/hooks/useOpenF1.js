@@ -1,20 +1,20 @@
 /**
  * useOpenF1.js — PITWALL
  *
- * Fetches live/recent data from OpenF1 via the PITWALL backend proxy.
- * The proxy injects the API key server-side — no key exposed in frontend.
+ * OpenF1 provides FREE historical data (2023+) — NO authentication needed.
+ * Real-time data requires a paid subscription (not used here).
  *
- * Usage:
- *   const { stints, positions, hasKey, loading } = useOpenF1(sessionKey)
+ * During LIVE sessions: real-time data comes from F1 SignalR via our backend.
+ * After sessions end: OpenF1 historical data used for strategy/telemetry analysis.
  *
- * All fetches are no-op if sessionKey is null or hasKey is false.
+ * All calls route through /api/openf1 backend proxy (avoids CORS issues).
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 
 const PROXY = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000') + '/api/openf1'
 
-// ── Fetch helper (GET via proxy) ──────────────────────────────────────────────
+// ── Generic fetch via proxy ───────────────────────────────────────────────────
 async function openf1Get(path, params = {}) {
   const url = new URL(`${PROXY}/${path}`)
   Object.entries(params).forEach(([k, v]) => {
@@ -25,75 +25,81 @@ async function openf1Get(path, params = {}) {
   return res.json()
 }
 
-// ── Stint + compound data ─────────────────────────────────────────────────────
+// ── Check if OpenF1 is reachable (no auth needed) ────────────────────────────
+export function useOpenF1Status() {
+  const [reachable, setReachable] = useState(false)
+  const [checked, setChecked]     = useState(false)
+
+  useEffect(() => {
+    // Ping OpenF1 with a lightweight query — historical sessions (always free)
+    openf1Get('v1/sessions', { year: 2025, limit: 1 })
+      .then(() => { setReachable(true);  setChecked(true) })
+      .catch(() => { setReachable(false); setChecked(true) })
+  }, [])
+
+  return { reachable, checked }
+}
+
+// ── Historical stints (post-session strategy analysis) ────────────────────────
+// Use this AFTER a session ends to get compound + lap data for strategy view.
+// Do NOT use during live sessions — SignalR provides live tyre data instead.
 export function useOpenF1Stints(sessionKey) {
   const [stints, setStints]   = useState([])
   const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState(null)
 
   useEffect(() => {
-    if (!sessionKey) return
+    if (!sessionKey) { setStints([]); return }
     let cancelled = false
-    setLoading(true)
+    setLoading(true); setError(null)
     openf1Get('v1/stints', { session_key: sessionKey })
       .then((data) => { if (!cancelled) setStints(Array.isArray(data) ? data : []) })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false) })
+      .catch((e)   => { if (!cancelled) setError(e.message) })
+      .finally(()  => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [sessionKey])
 
-  return { stints, loading }
+  return { stints, loading, error }
 }
 
-// ── Live car positions ────────────────────────────────────────────────────────
-export function useOpenF1Positions(sessionKey, pollMs = 2000) {
-  const [positions, setPositions] = useState([])
-  const timerRef = useRef(null)
-
-  const fetch_ = useCallback(async () => {
-    if (!sessionKey) return
-    try {
-      const data = await openf1Get('v1/location', {
-        session_key: sessionKey,
-        // Get only the latest batch — last 5 seconds
-      })
-      if (Array.isArray(data) && data.length) {
-        // Latest position per driver
-        const latest = {}
-        for (const d of data) {
-          latest[d.driver_number] = d
-        }
-        setPositions(Object.values(latest))
-      }
-    } catch (_) {}
-  }, [sessionKey])
+// ── Historical car telemetry (speed, throttle, brake, gear) ──────────────────
+// Post-session only — fetches per driver per lap for Telemetry tab.
+export function useOpenF1CarData(sessionKey, driverNumber, lap) {
+  const [data, setData]       = useState([])
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!sessionKey) return
-    fetch_()
-    timerRef.current = setInterval(fetch_, pollMs)
-    return () => clearInterval(timerRef.current)
-  }, [sessionKey, pollMs, fetch_])
+    if (!sessionKey || !driverNumber || !lap) { setData([]); return }
+    let cancelled = false
+    setLoading(true)
+    openf1Get('v1/car_data', {
+      session_key:   sessionKey,
+      driver_number: driverNumber,
+      lap_number:    lap,
+    })
+      .then((d) => { if (!cancelled) setData(Array.isArray(d) ? d : []) })
+      .catch(()  => { if (!cancelled) setData([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [sessionKey, driverNumber, lap])
 
-  return positions
+  return { data, loading }
 }
 
-// ── Driver radio messages ─────────────────────────────────────────────────────
+// ── Historical driver radio ───────────────────────────────────────────────────
 export function useOpenF1Radio(sessionKey) {
   const [radio, setRadio]     = useState([])
   const [loading, setLoading] = useState(false)
-  const seenRef = useRef(new Set())
 
   useEffect(() => {
-    if (!sessionKey) return
+    if (!sessionKey) { setRadio([]); return }
     let cancelled = false
     setLoading(true)
     openf1Get('v1/team_radio', { session_key: sessionKey })
       .then((data) => {
-        if (cancelled) return
-        if (!Array.isArray(data)) return
-        const fresh = data.filter((r) => !seenRef.current.has(r.date + r.driver_number))
-        fresh.forEach((r) => seenRef.current.add(r.date + r.driver_number))
-        setRadio((prev) => [...fresh.reverse(), ...prev].slice(0, 50))
+        if (!cancelled && Array.isArray(data)) {
+          setRadio([...data].reverse().slice(0, 50))
+        }
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -103,33 +109,34 @@ export function useOpenF1Radio(sessionKey) {
   return { radio, loading }
 }
 
-// ── Check if OpenF1 key is configured ────────────────────────────────────────
-export function useOpenF1Status() {
-  const [hasKey, setHasKey] = useState(false)
-  const [checked, setChecked] = useState(false)
+// ── Historical lap data ───────────────────────────────────────────────────────
+export function useOpenF1Laps(sessionKey, driverNumber) {
+  const [laps, setLaps]       = useState([])
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    const base = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
-    fetch(`${base}/api/openf1/status`)
-      .then((r) => r.json())
-      .then((d) => { setHasKey(!!d.has_key); setChecked(true) })
-      .catch(() => setChecked(true))
-  }, [])
+    if (!sessionKey) { setLaps([]); return }
+    let cancelled = false
+    setLoading(true)
+    const params = { session_key: sessionKey }
+    if (driverNumber) params.driver_number = driverNumber
+    openf1Get('v1/laps', params)
+      .then((d) => { if (!cancelled) setLaps(Array.isArray(d) ? d : []) })
+      .catch(() => { if (!cancelled) setLaps([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [sessionKey, driverNumber])
 
-  return { hasKey, checked }
+  return { laps, loading }
 }
 
-// ── Combined hook (main entry point) ─────────────────────────────────────────
-export function useOpenF1(sessionKey) {
-  const { hasKey, checked } = useOpenF1Status()
-  const { stints, loading: stintsLoading } = useOpenF1Stints(hasKey ? sessionKey : null)
-  const positions = useOpenF1Positions(hasKey ? sessionKey : null, 2000)
-
-  return {
-    hasKey,
-    checked,
-    stints,
-    positions,
-    loading: stintsLoading,
+// ── Session lookup (find OpenF1 session_key for a given round/session) ────────
+export async function lookupSessionKey(year, roundNumber, sessionName) {
+  try {
+    const data = await openf1Get('v1/sessions', { year, session_name: sessionName })
+    const match = data.find((s) => s.meeting_number === roundNumber || s.circuit_short_name)
+    return match?.session_key ?? null
+  } catch {
+    return null
   }
 }

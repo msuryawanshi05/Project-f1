@@ -274,10 +274,12 @@ export default function Live() {
   const weekendState = useRaceWeekendState()
   const isLive = weekendState.mode === 'SESSION_LIVE'
 
-  // OpenF1 — stints enrich tyre data with compound + age
+  // OpenF1 stints — used POST-SESSION for strategy analysis.
+  // During live sessions SignalR provides real-time tyre data via TimingAppData.
+  // Historical OpenF1 data is free with no auth (real-time requires paid plan).
   const sessionKey = useF1Store((s) => s.currentSessionKey)
-  const { stints: openf1Stints } = useOpenF1Stints(isLive ? sessionKey : null)
-  const { hasKey: openf1HasKey } = useOpenF1Status()
+  const { stints: openf1Stints } = useOpenF1Stints(!isLive ? sessionKey : null)
+  const { reachable: openf1Reachable } = useOpenF1Status()
 
   // Memoised derived data
   const sortedTiming = useMemo(() =>
@@ -406,9 +408,12 @@ export default function Live() {
           </button>
         ))}
         <div className="ml-auto flex items-center gap-3 px-4">
-          {/* OpenF1 key status indicator */}
-          <div className="flex items-center gap-1" title={openf1HasKey ? 'OpenF1 connected' : 'OpenF1 key not set — add OPENF1_API_KEY to .env'}>
-            <span className={`w-1.5 h-1.5 rounded-full ${openf1HasKey ? 'bg-status-green' : 'bg-pitwall-ghost'}`} />
+          {/* OpenF1 reachability indicator */}
+          <div className="flex items-center gap-1"
+            title={openf1Reachable
+              ? 'OpenF1 reachable — historical data available (post-session analysis)'
+              : 'OpenF1 unreachable — check internet connection'}>
+            <span className={`w-1.5 h-1.5 rounded-full ${openf1Reachable ? 'bg-status-green' : 'bg-pitwall-ghost'}`} />
             <span className="font-mono text-[10px]" style={{ color: 'var(--pw-ghost)' }}>OF1</span>
           </div>
           <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>{session.clock ?? '—'}</span>

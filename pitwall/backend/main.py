@@ -132,22 +132,18 @@ async def current_session():
     today = date.today()
     year  = today.year
 
-    api_key = os.getenv("OPENF1_API_KEY", "").strip()
-    headers = {"X-Api-Key": api_key} if api_key else {}
-
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             resp = await client.get(
                 "https://api.openf1.org/v1/sessions",
                 params={"year": year},
-                headers=headers,
             )
             if resp.status_code == 401:
                 logger.warning(
-                    "OpenF1 returned 401 Unauthorized — set OPENF1_API_KEY in .env to enable live data. "
-                    "Falling back to calendar-only mode."
+                    "OpenF1 returned 401 — this is unexpected for historical data. "
+                    "Note: real-time data requires paid subscription; we use SignalR for live data."
                 )
-                return {"session_key": None, "source": "no_auth", "error": "OpenF1 requires API key for current year"}
+                return {"session_key": None, "source": "auth_error"}
             resp.raise_for_status()
             sessions = resp.json()
         except httpx.HTTPStatusError as exc:
@@ -188,33 +184,40 @@ async def current_session():
 @app.get("/api/openf1/status")
 async def openf1_status():
     """
-    Returns whether an OpenF1 API key is configured.
-    Frontend uses this to know if OpenF1 endpoints will work.
+    Checks OpenF1 reachability.
+    Historical data (2023+) is FREE with no authentication.
+    Real-time data requires a paid subscription — not used here.
+    Live timing comes from the F1 SignalR feed instead.
     """
-    api_key = os.getenv("OPENF1_API_KEY", "").strip()
-    return {"has_key": bool(api_key)}
+    async with httpx.AsyncClient(timeout=5) as client:
+        try:
+            resp = await client.get(
+                "https://api.openf1.org/v1/sessions",
+                params={"year": 2025, "limit": 1},
+            )
+            return {"reachable": resp.status_code == 200, "note": "historical_free_no_auth"}
+        except Exception:
+            return {"reachable": False}
 
 
 @app.get("/api/openf1/{path:path}")
 async def openf1_proxy(path: str, request: Request):
     """
-    Transparent proxy for OpenF1 API — injects API key server-side.
+    Transparent proxy for OpenF1 API.
+    Historical data (2023+) is FREE — no API key needed.
+    Real-time data requires paid subscription — we use F1 SignalR for live data instead.
+
     Frontend calls: GET /api/openf1/v1/stints?session_key=123
     Backend calls:  GET https://api.openf1.org/v1/stints?session_key=123
-                    with X-Api-Key header injected.
     """
     from starlette.responses import Response
 
-    api_key = os.getenv("OPENF1_API_KEY", "").strip()
-    headers = {"X-Api-Key": api_key} if api_key else {}
-
-    # Forward all query params from the original request
     params = dict(request.query_params)
     url = f"https://api.openf1.org/{path}"
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:
-            resp = await client.get(url, params=params, headers=headers)
+            resp = await client.get(url, params=params)
             return Response(
                 content=resp.content,
                 status_code=resp.status_code,
