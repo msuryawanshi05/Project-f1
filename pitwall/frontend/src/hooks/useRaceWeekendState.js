@@ -23,17 +23,18 @@ import useF1Store from '../store/useF1Store'
 import circuits from '../data/circuits.json'
 
 const SESSION_LABELS = {
-  FirstPractice:  'FP1',
-  SecondPractice: 'FP2',
-  ThirdPractice:  'FP3',
-  Sprint:         'SPRINT',
-  Qualifying:     'QUALIFYING',
-  Race:           'RACE',
+  FirstPractice:    'FP1',
+  SecondPractice:   'FP2',
+  ThirdPractice:    'FP3',
+  SprintQualifying: 'SPRINT QUALIFYING',
+  Sprint:           'SPRINT',
+  Qualifying:       'QUALIFYING',
+  Race:             'RACE',
 }
 
 /** Build ordered session list from a race object */
 function buildSessions(race) {
-  const order = ['FirstPractice', 'SecondPractice', 'ThirdPractice', 'Sprint', 'Qualifying']
+  const order = ['FirstPractice', 'SecondPractice', 'ThirdPractice', 'SprintQualifying', 'Sprint', 'Qualifying']
   const sessions = []
 
   for (const key of order) {
@@ -79,16 +80,50 @@ export default function useRaceWeekendState() {
   return useMemo(() => {
     const now = new Date()
 
-    // ── SESSION_LIVE — trust the WebSocket phase ──────────────────────────────
-    const isLivePhase = ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
+    // ── SESSION_LIVE — trust the WebSocket phase or active lap count ────────
+    const isLivePhase = ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase) || Boolean(session.lap && session.lap >= 1)
     if (isLivePhase) {
+      let activeRace = null
+      for (const race of calendar) {
+        const sessions = buildSessions(race)
+        if (!sessions.length) continue
+        const firstDt = sessions[0].dt
+        const lastDt  = sessions[sessions.length - 1].dt
+        const lastDtEnd = new Date(lastDt.getTime() + 4 * 60 * 60 * 1000)
+        if (now >= firstDt && now <= lastDtEnd) {
+          activeRace = { race, sessions }
+          break
+        }
+      }
+
+      // Fallback: find nearest race if clock is slightly off
+      if (!activeRace && calendar.length) {
+        let minDiff = Infinity
+        let bestRace = null
+        for (const race of calendar) {
+          const sessions = buildSessions(race)
+          const raceDt = sessions[sessions.length - 1]?.dt
+          if (raceDt) {
+            const diff = Math.abs(now - raceDt)
+            if (diff < minDiff) {
+              minDiff = diff
+              bestRace = { race, sessions }
+            }
+          }
+        }
+        activeRace = bestRace
+      }
+
+      const race = activeRace?.race ?? null
+      const circuitData = race ? matchCircuitData(race) : null
+
       return {
         mode: 'SESSION_LIVE',
-        currentRace: null,
+        currentRace: race,
         nextSession: null,
         lastSession: null,
-        weekendSessions: [],
-        circuitData: null,
+        weekendSessions: activeRace ? activeRace.sessions : [],
+        circuitData,
       }
     }
 

@@ -1,18 +1,20 @@
 import { NavLink } from 'react-router-dom'
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
 import useF1Store from '../../store/useF1Store'
-import { getTrackStatus } from '../../utils/driverUtils'
+import { getTrackStatus, formatCountdown } from '../../utils/driverUtils'
 import NotificationStack from '../ui/NotificationStack'
 import useNotificationTriggers from '../../hooks/useNotificationTriggers'
 import DataMonitor from '../dev/DataMonitor'
+import BroadcastBanner from '../ui/BroadcastBanner'
 
 const NAV = [
-  { to: '/',           label: 'HOME'      },
-  { to: '/live',       label: 'LIVE'      },
-  { to: '/season',     label: 'SEASON'    },
-  { to: '/standings',  label: 'STANDINGS' },
-  { to: '/results',    label: 'RESULTS'   },
-  { to: '/settings',   label: 'SETTINGS'  },
+  { to: '/',           label: 'HOME',      key: '1' },
+  { to: '/live',       label: 'LIVE',      key: '2' },
+  { to: '/season',     label: 'SEASON',    key: '3' },
+  { to: '/standings',  label: 'STANDINGS', key: '4' },
+  { to: '/results',    label: 'RESULTS',   key: '5' },
+  { to: '/settings',   label: 'SETTINGS',  key: '6' },
 ]
 
 /**
@@ -21,25 +23,28 @@ const NAV = [
  */
 function getNextSessionInfo(calendar) {
   const now = new Date()
-  const todayStr     = now.toISOString().slice(0, 10)
-  const tomorrowStr  = new Date(now.getTime() + 86400000).toISOString().slice(0, 10)
 
   for (const race of calendar) {
     // Build ordered session list for this round
-    const sessions = []
-    if (race.FirstPractice?.date)  sessions.push({ name: 'FP1',        date: race.FirstPractice.date,  time: race.FirstPractice.time })
-    if (race.SecondPractice?.date) sessions.push({ name: 'FP2',        date: race.SecondPractice.date, time: race.SecondPractice.time })
-    if (race.ThirdPractice?.date)  sessions.push({ name: 'FP3',        date: race.ThirdPractice.date,  time: race.ThirdPractice.time })
-    if (race.Sprint?.date)         sessions.push({ name: 'SPRINT',     date: race.Sprint.date,         time: race.Sprint.time })
-    if (race.Qualifying?.date)     sessions.push({ name: 'QUALIFYING', date: race.Qualifying.date,     time: race.Qualifying.time })
-    if (race.date)                 sessions.push({ name: 'RACE',       date: race.date,                time: race.time ?? '12:00:00Z' })
+    const list = []
+    if (race.FirstPractice?.date)  list.push({ label: `${race.raceName.replace(' Grand Prix','')}: FP1`,  dt: new Date(`${race.FirstPractice.date}T${race.FirstPractice.time ?? '12:00:00Z'}`), date: race.FirstPractice.date })
+    if (race.SecondPractice?.date) list.push({ label: `${race.raceName.replace(' Grand Prix','')}: FP2`,  dt: new Date(`${race.SecondPractice.date}T${race.SecondPractice.time ?? '12:00:00Z'}`), date: race.SecondPractice.date })
+    if (race.ThirdPractice?.date)  list.push({ label: `${race.raceName.replace(' Grand Prix','')}: FP3`,  dt: new Date(`${race.ThirdPractice.date}T${race.ThirdPractice.time ?? '12:00:00Z'}`), date: race.ThirdPractice.date })
+    if (race.Sprint?.date)         list.push({ label: `${race.raceName.replace(' Grand Prix','')}: SPRINT`, dt: new Date(`${race.Sprint.date}T${race.Sprint.time ?? '12:00:00Z'}`), date: race.Sprint.date })
+    if (race.Qualifying?.date)     list.push({ label: `${race.raceName.replace(' Grand Prix','')}: QUALI`,  dt: new Date(`${race.Qualifying.date}T${race.Qualifying.time ?? '12:00:00Z'}`), date: race.Qualifying.date })
+    if (race.date)                 list.push({ label: `${race.raceName.replace(' Grand Prix','')}: RACE`,   dt: new Date(`${race.date}T${race.time ?? '14:00:00Z'}`), date: race.date })
 
-    for (const s of sessions) {
-      const dt = new Date(`${s.date}T${s.time ?? '12:00:00Z'}`)
-      if (dt > now) {
+    for (const s of list) {
+      if (s.dt >= now) {
+        const today = new Date()
+        const tomorrow = new Date(today)
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        const todayStr = today.toISOString().slice(0, 10)
+        const tomorrowStr = tomorrow.toISOString().slice(0, 10)
+
         return {
-          label:      `${race.raceName?.replace(' Grand Prix', ' GP') ?? ''} — ${s.name}`,
-          targetDt:   dt,
+          label:      s.label,
+          targetDt:   s.dt,
           isToday:    s.date === todayStr,
           isTomorrow: s.date === tomorrowStr,
         }
@@ -50,31 +55,29 @@ function getNextSessionInfo(calendar) {
 }
 
 function Countdown({ targetDate }) {
-  const [diff, setDiff] = useState(null)
+  const [diffSeconds, setDiffSeconds] = useState(null)
 
   useEffect(() => {
     if (!targetDate) return
     const tick = () => {
-      const ms = targetDate - Date.now()
-      if (ms <= 0) { setDiff(null); return }
-      const d = Math.floor(ms / 86400000)
-      const h = Math.floor((ms % 86400000) / 3600000)
-      const m = Math.floor((ms % 3600000) / 60000)
-      const s = Math.floor((ms % 60000) / 1000)
-      setDiff({ d, h, m, s })
+      const sec = Math.floor((targetDate - Date.now()) / 1000)
+      if (sec <= 0) { setDiffSeconds(null); return }
+      setDiffSeconds(sec)
     }
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [targetDate])
 
-  if (!diff) return null
-  const parts = diff.d > 0
-    ? `${diff.d}D ${String(diff.h).padStart(2,'0')}H ${String(diff.m).padStart(2,'0')}M ${String(diff.s).padStart(2,'0')}S`
-    : `${String(diff.h).padStart(2,'0')}H ${String(diff.m).padStart(2,'0')}M ${String(diff.s).padStart(2,'0')}S`
+  if (diffSeconds === null) return null
   return (
-    <span className="font-mono text-xs tracking-wide" style={{ color: 'var(--pw-dim)' }}>
-      {parts}
+    <span
+      className="font-mono text-xs tracking-wide"
+      style={{ color: 'var(--pw-text-strong)' }}
+      aria-live="off"
+      aria-label={`${formatCountdown(diffSeconds)} until session`}
+    >
+      {formatCountdown(diffSeconds)}
     </span>
   )
 }
@@ -95,23 +98,25 @@ export default function AppShell({ children, wsConnected }) {
 
   // Track status badge colour
   const tsBadgeClass = ts.severity === 'red'
-    ? 'bg-status-red text-white'
+    ? 'bg-[#E10600] text-white'
     : ts.severity === 'yellow'
-    ? 'bg-status-yellow text-black'
+    ? 'bg-[#FFF200] text-black'
     : ''
 
   return (
     <div className="flex flex-col min-h-screen" style={{ background: 'var(--pw-bg)' }}>
-      {/* ── Top bar ────────────────────────────────────────────── */}
+      {/* Sleek top red stripe */}
+      <div className="fixed top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-status-red via-[#FF5F5A] to-status-red z-50" aria-hidden="true" />
+
+      {/* ── Top bar ─────────────────────────────────────────────── */}
       <header
-        className="fixed top-0 left-0 right-0 z-50 h-12 border-b flex items-center px-4 gap-4"
-        style={{ background: 'var(--pw-surface)', borderColor: 'var(--pw-border)' }}
+        role="banner"
+        className="fixed top-[2px] left-0 right-0 z-50 h-12 flex items-center px-4 gap-4 border-b border-pitwall-border glass-panel"
       >
         {/* Logo */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="w-2 h-2 rounded-full bg-status-red" />
-          <span className="font-display font-bold text-xl tracking-widest uppercase"
-            style={{ color: 'var(--pw-text-strong)' }}>
+        <div className="flex items-center gap-2 flex-shrink-0 bg-pitwall-surface border border-pitwall-border px-3 py-1 rounded-sm clip-skew">
+          <span className={`w-2 h-2 rounded-full led-dot ${wsConnected ? 'green' : 'dim'} clip-skew-cancel`} aria-hidden="true" />
+          <span className="font-display font-extrabold text-sm tracking-widest uppercase text-pitwall-text-strong clip-skew-cancel">
             PITWALL
           </span>
         </div>
@@ -119,94 +124,123 @@ export default function AppShell({ children, wsConnected }) {
         {/* Centre — session status OR next session countdown */}
         <div className="flex-1 flex items-center justify-center gap-3">
           {isLive ? (
-            <>
-              <span className="led-dot green" />
-              <span className="font-display text-sm font-bold tracking-wider text-status-red uppercase px-2 py-0.5 bg-status-red/20 border border-status-red/30">
-                LIVE
+            <div className="flex items-center gap-3 bg-status-red/10 border border-status-red/30 px-3 py-1 rounded-sm">
+              <span className="led-dot red" aria-hidden="true" />
+              <span className="font-display text-xs font-bold tracking-widest text-status-red uppercase">
+                LIVE TIMING
               </span>
-              <span className="font-mono text-sm" style={{ color: 'var(--pw-text-strong)' }}>
-                {session.name ?? 'SESSION'} — LAP {session.lap ?? '—'}/{session.total_laps ?? '—'}
+              <span className="font-mono text-xs font-semibold text-pitwall-text-strong tracking-wide">
+                {session.name?.toUpperCase() ?? 'SESSION'} · LAP {session.lap ?? '—'}/{session.total_laps ?? '—'}
               </span>
               {ts.severity !== 'green' && (
-                <span className={`text-xs font-mono font-bold px-2 py-0.5 ${tsBadgeClass}`}>
-                  ⚠ {ts.label}
+                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 animate-pulse ${tsBadgeClass}`}>
+                  ⚠ {ts.label.toUpperCase()}
                 </span>
               )}
-            </>
+            </div>
           ) : nextSession ? (
-            <>
-              <span className="led-dot dim" />
+            <div className="flex items-center gap-3 bg-pitwall-surface border border-pitwall-border px-3 py-1 rounded-sm">
+              <span className="led-dot dim" aria-hidden="true" />
               {nextSession.isToday ? (
-                <span className="font-mono text-[10px] text-status-yellow border border-status-yellow/30 px-1.5 py-0.5 tracking-widest">
+                <span className="font-mono text-[9px] text-status-yellow border border-status-yellow/40 px-1.5 py-0.5 tracking-widest uppercase">
                   TODAY
                 </span>
               ) : nextSession.isTomorrow ? (
-                <span className="font-mono text-[10px] border px-1.5 py-0.5 tracking-widest"
-                  style={{ color: 'var(--pw-dim)', borderColor: 'var(--pw-muted)' }}>
+                <span className="font-mono text-[9px] border px-1.5 py-0.5 tracking-widest uppercase"
+                  style={{ color: 'var(--pw-dim)', borderColor: 'var(--pw-border)' }}>
                   TOMORROW
                 </span>
               ) : null}
-              <span className="font-display text-sm tracking-wider uppercase"
-                style={{ color: 'var(--pw-dim)' }}>
+              <span className="font-display text-xs font-semibold uppercase tracking-wider text-pitwall-dim">
                 {nextSession.label}
               </span>
               <Countdown targetDate={nextSession.targetDt} />
-            </>
+            </div>
           ) : (
-            <>
-              <span className="led-dot dim" />
-              <span className="font-display text-sm tracking-wider uppercase"
-                style={{ color: 'var(--pw-ghost)' }}>
+            <div className="flex items-center gap-2 bg-pitwall-surface border border-pitwall-border px-3 py-1 rounded-sm">
+              <span className="led-dot dim" aria-hidden="true" />
+              <span className="font-display text-xs font-semibold tracking-widest uppercase text-pitwall-ghost">
                 OFF SEASON
               </span>
-            </>
+            </div>
           )}
         </div>
 
-        {/* Right — WS connection */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className={`led-dot ${wsConnected ? 'green' : 'dim'}`} />
-          <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>
-            {wsConnected ? 'connected' : 'offline'}
-          </span>
+        {/* Right — WS connection status + shortcuts hint */}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <div
+            role="status"
+            aria-label={`WebSocket: ${wsConnected ? 'connected' : 'disconnected'}`}
+            className="flex items-center gap-1.5 bg-pitwall-surface border border-pitwall-border px-2 py-0.5 rounded-sm"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-status-green' : 'bg-pitwall-ghost'}`} aria-hidden="true" />
+            <span className="font-mono text-[10px] uppercase tracking-wider text-pitwall-dim">
+              {wsConnected ? 'LIVE' : 'OFFLINE'}
+            </span>
+          </div>
+
+          {/* ? shortcut hint button */}
+          <button
+            onClick={() => window.__pitwall_openShortcuts?.()}
+            className="font-mono text-[11px] text-pitwall-ghost hover:text-pitwall-text-strong transition-colors w-6 h-6 flex items-center justify-center border border-pitwall-border rounded-sm hover:border-pitwall-ghost"
+            aria-label="Show keyboard shortcuts (?)"
+            title="Keyboard shortcuts (?)"
+          >
+            ?
+          </button>
         </div>
       </header>
 
-      {/* ── Nav tabs ───────────────────────────────────────────── */}
+      {/* ── Nav tabs ────────────────────────────────────────────── */}
       <nav
-        className="fixed top-12 left-0 right-0 z-40 h-9 border-b flex items-center px-4"
-        style={{ background: 'var(--pw-surface)', borderColor: 'var(--pw-border)' }}
+        role="navigation"
+        aria-label="Main navigation"
+        className="fixed top-14 left-0 right-0 z-40 h-9 border-b border-pitwall-border flex items-center px-4 glass-panel bg-carbon"
       >
         {NAV.map(({ to, label }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
-            className={({ isActive }) =>
-              `flex items-center h-full px-4 font-display text-xs tracking-widest uppercase transition-colors ${
-                isActive
-                  ? 'border-b-2 border-status-red'
-                  : 'border-b-2 border-transparent'
-              }`
-            }
-            style={({ isActive }) => ({
-              color: isActive ? 'var(--pw-text-strong)' : 'var(--pw-ghost)',
-            })}
+            className="flex items-center h-full px-5 font-display text-xs tracking-widest uppercase transition-colors relative select-none"
+            role="tab"
           >
-            {label}
+            {({ isActive }) => (
+              <>
+                <span className={`relative z-10 font-bold transition-colors ${isActive ? 'text-pitwall-text-strong' : 'text-pitwall-ghost hover:text-pitwall-text-strong'}`}>
+                  {label}
+                </span>
+                {isActive && (
+                  <motion.div
+                    layoutId="activeTab"
+                    className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-status-red"
+                    transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+                  />
+                )}
+              </>
+            )}
           </NavLink>
         ))}
       </nav>
 
-      {/* ── Main content (offset for 48px header + 36px nav = 84px) */}
-      <main className="flex-1 mt-[84px] mb-7 overflow-auto" style={{ background: 'var(--pw-bg)' }}>
+      {/* ── Main content ────────────────────────────────────────── */}
+      <main
+        role="main"
+        id="main-content"
+        className="flex-1 mt-[104px] mb-7 overflow-auto"
+        style={{ background: 'var(--pw-bg)' }}
+        tabIndex={-1}
+      >
+        {/* Polite live region for timing updates */}
+        <div aria-live="polite" aria-atomic="false" className="sr-only" id="timing-announcer" />
+
         {children}
       </main>
 
-      {/* ── Notification stack — top right ───────────── */}
+      {/* ── Notification stack — top right ──────────────────────── */}
       <NotificationStack />
 
-      {/* ── Dev data monitor (DEV only) ──────────────── */}
+      {/* ── Dev data monitor (DEV only) ─────────────────────────── */}
       {import.meta.env.DEV && <DataMonitor />}
     </div>
   )

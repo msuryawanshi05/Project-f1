@@ -13,84 +13,131 @@ import useRaceWeekendState from '../hooks/useRaceWeekendState'
 import TrackMap from '../components/ui/TrackMap'
 import RaceModal from '../components/ui/RaceModal'
 import circuits from '../data/circuits.json'
+import { getCountryAbbreviation, formatCountdown, getSafeTeamColour } from '../utils/driverUtils'
+import { useTilt } from '../hooks/useTilt'
+import { AnimatedNumber } from '../components/ui/AnimatedNumber'
+import { PageReveal, RevealItem } from '../components/layout/PageReveal'
+import { motion } from 'framer-motion'
 
 // ── Countdown ─────────────────────────────────────────────────────────────────
-function useCountdown(targetDate) {
-  const [parts, setParts] = useState(null)
+function useCountdownSeconds(targetDate) {
+  const [seconds, setSeconds] = useState(null)
   useEffect(() => {
     if (!targetDate) return
     const tick = () => {
       const ms = new Date(targetDate) - new Date()
-      if (ms <= 0) { setParts(null); return }
-      setParts({
-        d: Math.floor(ms / 86400000),
-        h: Math.floor((ms % 86400000) / 3600000),
-        m: Math.floor((ms % 3600000) / 60000),
-        s: Math.floor((ms % 60000) / 1000),
-      })
+      if (ms <= 0) { setSeconds(null); return }
+      setSeconds(Math.floor(ms / 1000))
     }
-    tick(); const id = setInterval(tick, 1000); return () => clearInterval(id)
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
   }, [targetDate])
-  return parts
-}
-
-const FLAGS = {
-  Japan: '🇯🇵', Australia: '🇦🇺', China: '🇨🇳', Bahrain: '🇧🇭',
-  'Saudi Arabia': '🇸🇦', 'United States': '🇺🇸', 'United Arab Emirates': '🇦🇪',
-  Brazil: '🇧🇷', Mexico: '🇲🇽', Italy: '🇮🇹', Spain: '🇪🇸',
-  Monaco: '🇲🇨', Canada: '🇨🇦', Austria: '🇦🇹', UK: '🇬🇧',
-  'United Kingdom': '🇬🇧', Belgium: '🇧🇪', Netherlands: '🇳🇱',
-  Hungary: '🇭🇺', Azerbaijan: '🇦🇿', Singapore: '🇸🇬',
-  Qatar: '🇶🇦', 'Las Vegas': '🇺🇸', UAE: '🇦🇪', USA: '🇺🇸',
+  return seconds
 }
 
 const TEAM_COLOURS = {
   'Red Bull': '#3671C6', 'Ferrari': '#E8002D', 'Mercedes': '#27F4D2',
   'McLaren': '#FF8000', 'Aston Martin': '#229971', 'Alpine': '#FF87BC',
   'Williams': '#64C4FF', 'RB': '#6692FF', 'Haas': '#B6BABD', 'Sauber': '#52E252',
+  'Audi': '#A6A6A6', 'Cadillac': '#EEB211',
 }
 function getTeamColour(name) {
-  return Object.entries(TEAM_COLOURS).find(([k]) =>
+  const hex = Object.entries(TEAM_COLOURS).find(([k]) =>
     name?.toLowerCase().includes(k.toLowerCase())
   )?.[1] ?? '#555555'
+  return getSafeTeamColour(hex)
 }
 
 // ── Podium card ───────────────────────────────────────────────────────────────
 function PodiumCard({ result, pos }) {
   if (!result) return (
-    <div className="flex-1 border border-pitwall-border p-4 opacity-20 min-h-[90px]"
-      style={{ background: 'var(--pw-surface)' }}>—</div>
+    <div className="flex-1 border border-white/5 p-4 opacity-20 min-h-[110px] flex items-center justify-center bg-white/2 rounded-sm"
+      style={{ borderStyle: 'dashed' }}>
+      <span className="font-mono text-xs text-pitwall-ghost">P{pos}</span>
+    </div>
   )
   const driver = result.Driver ?? {}
   const team   = result.Constructor?.name ?? ''
   const code   = driver.code ?? driver.driverId ?? '???'
   const colour = getTeamColour(team)
   const time   = result.Time?.time ?? result.status ?? '—'
+  const isP1   = pos === 1
+  const isP2   = pos === 2
+
+  // Stepped heights: P1 (center) = tallest, P2 = middle, P3 = shortest
+  const heightCls = isP1 ? 'min-h-[165px]' : isP2 ? 'min-h-[150px]' : 'min-h-[135px]'
+
+  const { ref, rotateX, rotateY, onMouseMove, onMouseLeave } = useTilt(6)
 
   return (
-    <div
-      className="flex-1 border border-pitwall-border p-4 flex flex-col gap-1 relative overflow-hidden"
+    <motion.div
+      ref={ref}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
       style={{
-        borderTop: `3px solid ${colour}`,
-        background: `linear-gradient(135deg, ${colour}18 0%, ${colour}06 100%)`,
+        borderTop: `3.5px solid ${colour}`,
+        background: `linear-gradient(180deg, var(--pw-surface) 0%, ${colour}15 100%)`,
+        boxShadow: `0 8px 30px ${colour}10`,
+        rotateX,
+        rotateY,
+        transformPerspective: 800,
       }}
+      whileHover={{ scale: 1.02 }}
+      className={`flex-1 flex flex-col justify-end p-4 border border-pitwall-border relative overflow-hidden ${heightCls} rounded-sm glow-card`}
     >
-      {/* position */}
-      <div className="font-mono text-[10px] tracking-widest" style={{ color: 'var(--pw-ghost)' }}>P{pos}</div>
-      {/* code */}
+      {/* P1 Shine sweep */}
+      {isP1 && (
+        <motion.div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: 'linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.15) 50%, transparent 70%)' }}
+          initial={{ x: '-100%' }}
+          animate={{ x: '200%' }}
+          transition={{ duration: 1.4, delay: 0.3, ease: 'easeInOut' }}
+        />
+      )}
+
+      {/* Ambient glow in background */}
+      <div 
+        className="absolute bottom-0 left-0 right-0 h-10 opacity-30 pointer-events-none blur-md"
+        style={{ background: colour }}
+      />
+      
+      {/* Stepped overlay P1/P2/P3 indicator */}
+      <div 
+        className="absolute top-2 right-2 font-display text-[28px] font-extrabold italic opacity-15 leading-none select-none"
+        style={{ color: colour }}
+      >
+        P{pos}
+      </div>
+
+      {/* Code */}
       <div
-        className={`font-display font-bold tracking-wider ${pos === 1 ? 'text-4xl' : 'text-2xl'}`}
+        className="font-display font-black tracking-wider leading-snug text-2xl"
         style={{ color: colour }}
       >
         {code}
       </div>
-      {/* name */}
-      <div className="font-body text-sm" style={{ color: 'var(--pw-dim)' }}>{driver.familyName}</div>
-      {/* team */}
-      <div className="font-body text-xs" style={{ color: 'var(--pw-ghost)' }}>{team}</div>
-      {/* time */}
-      <div className="font-mono text-xs mt-1 font-medium" style={{ color: 'var(--pw-text)' }}>{time}</div>
-    </div>
+
+      {/* Full family name */}
+      <div className="font-body text-xs font-semibold mt-1 truncate text-pitwall-text leading-snug">
+        {driver.familyName?.toUpperCase()}
+      </div>
+
+      {/* Constructor */}
+      <div className="flex items-center gap-1.5 mt-1.5">
+        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: colour }} />
+        <span className="font-display text-[10px] tracking-widest font-bold truncate uppercase text-pitwall-text leading-none">
+          {team}
+        </span>
+      </div>
+
+      {/* Time */}
+      <div className="font-mono text-[9px] mt-2 pt-1.5 border-t border-pitwall-border flex justify-between" style={{ color: 'var(--pw-text-strong)' }}>
+        <span className="text-pitwall-dim">LAP TIME:</span>
+        <span className="font-bold">{time}</span>
+      </div>
+    </motion.div>
   )
 }
 
@@ -100,25 +147,38 @@ function RaceCard({ race, onOpen }) {
     c.name?.toLowerCase().includes(race.raceName?.toLowerCase().replace(' grand prix', '').trim()) ||
     race.raceName?.toLowerCase().includes(c.name?.toLowerCase().replace(' grand prix', '').trim())
   )
-  const flag   = FLAGS[race.Circuit?.Location?.country] ?? '🏁'
+  const flag   = getCountryAbbreviation(race.Circuit?.Location?.country)
   const isPast = new Date(race.date) < new Date()
 
+  const { ref, rotateX, rotateY, onMouseMove, onMouseLeave } = useTilt(5)
+
   return (
-    <button
+    <motion.button
+      ref={ref}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
       onClick={() => !isPast && onOpen(race, cd ?? null)}
       disabled={isPast}
+      whileHover={isPast ? {} : { scale: 1.02 }}
+      whileTap={isPast ? {} : { scale: 0.98 }}
       className={`w-full text-left border border-pitwall-border p-3 flex items-center gap-3 transition-all ${
-        isPast ? 'opacity-30 cursor-default' : 'hover:border-status-red/50 cursor-pointer group'
+        isPast ? 'opacity-50 cursor-default' : 'hover:border-status-red/70 hover:bg-pitwall-surface-2 cursor-pointer group'
       }`}
-      style={{ background: 'var(--pw-surface)' }}
+      style={{
+        background: 'var(--pw-surface)',
+        rotateX,
+        rotateY,
+        transformPerspective: 600,
+      }}
     >
-      <span className="text-lg flex-shrink-0">{flag}</span>
+      <div className="flex-shrink-0 font-mono font-bold text-xs bg-pitwall-surface-2 border border-pitwall-border px-1.5 py-0.5 rounded-sm text-pitwall-text-strong w-10 text-center">
+        {flag}
+      </div>
       <div className="flex-1 min-w-0">
-        <div className="font-display font-semibold text-sm tracking-wide leading-tight truncate"
-          style={{ color: 'var(--pw-text-strong)' }}>
+        <div className="font-display font-semibold text-sm tracking-wide leading-tight truncate text-pitwall-text-strong">
           {race.raceName?.replace(' Grand Prix', '')}
         </div>
-        <div className="font-mono text-[10px]" style={{ color: 'var(--pw-ghost)' }}>
+        <div className="font-mono text-[10px] text-pitwall-dim">
           R{race.round} · {race.date}
         </div>
       </div>
@@ -126,10 +186,9 @@ function RaceCard({ race, onOpen }) {
         <span className="font-mono text-[9px] text-status-yellow border border-status-yellow/40 px-1 flex-shrink-0">S</span>
       )}
       {!isPast && (
-        <span className="font-mono text-xs flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-          style={{ color: 'var(--pw-red)' }}>›</span>
+        <span className="font-mono text-xs flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-status-red">›</span>
       )}
-    </button>
+    </motion.button>
   )
 }
 
@@ -150,10 +209,10 @@ function WeekendSchedule({ weekendSessions }) {
             {s.done ? '✓' : s.live ? '●' : '○'}
           </span>
           <span className={`font-mono text-xs flex-1 ${s.live ? 'font-bold' : ''}`}
-            style={{ color: s.done ? 'var(--pw-ghost)' : s.live ? '#00A651' : 'var(--pw-text)' }}>
+            style={{ color: s.done ? 'var(--pw-dim)' : s.live ? '#00A651' : 'var(--pw-text)' }}>
             {s.label}
           </span>
-          <span className="font-mono text-[10px]" style={{ color: 'var(--pw-ghost)' }}>
+          <span className="font-mono text-[10px]" style={{ color: 'var(--pw-dim)' }}>
             {s.dt?.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
           </span>
         </div>
@@ -162,34 +221,6 @@ function WeekendSchedule({ weekendSessions }) {
   )
 }
 
-// ── Countdown block ───────────────────────────────────────────────────────────
-function CountdownBlock({ countdown, label }) {
-  if (!countdown) return null
-  const units = [
-    { val: countdown.d,                           lbl: 'days' },
-    { val: String(countdown.h).padStart(2, '0'), lbl: 'hrs'  },
-    { val: String(countdown.m).padStart(2, '0'), lbl: 'min'  },
-    { val: String(countdown.s).padStart(2, '0'), lbl: 'sec'  },
-  ]
-  return (
-    <div>
-      {label && (
-        <div className="font-mono text-[10px] tracking-widest uppercase mb-3 text-center"
-          style={{ color: 'var(--pw-ghost)' }}>
-          {label}
-        </div>
-      )}
-      <div className="flex items-end gap-3 justify-center">
-        {units.map(({ val, lbl }) => (
-          <div key={lbl} className="flex flex-col items-center">
-            <span className="countdown-unit" style={{ color: 'var(--pw-text-strong)' }}>{val}</span>
-            <span className="countdown-label">{lbl}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 // ── Home ──────────────────────────────────────────────────────────────────────
 export default function Home() {
@@ -211,7 +242,7 @@ export default function Home() {
   const nextRace    = currentRace ?? futureRaces[0] ?? null
 
   const countdownTarget = nextSession?.targetDt ?? (nextRace ? new Date(`${nextRace.date}T${nextRace.time ?? '13:00:00Z'}`) : null)
-  const countdown       = useCountdown(countdownTarget)
+  const countdownSeconds = useCountdownSeconds(countdownTarget)
 
   const lastRound  = pastRaces[pastRaces.length - 1]
   const lastResult = lastRound ? results[lastRound.round] : null
@@ -221,7 +252,7 @@ export default function Home() {
   const p2Driver = standings.drivers[1] ?? null
   const maxPts   = parseFloat(p1Driver?.points ?? 0)
 
-  const heroFlag = FLAGS[nextRace?.Circuit?.Location?.country ?? ''] ?? '🏁'
+  const heroFlag = getCountryAbbreviation(nextRace?.Circuit?.Location?.country)
 
   const [modalRace,    setModalRace]    = useState(null)
   const [modalCircuit, setModalCircuit] = useState(null)
@@ -233,28 +264,33 @@ export default function Home() {
 
       {/* ══════════════════════════════════════════════════════
           HERO — 3 column: [left info 2/3] [right map 1/3]
-      ══════════════════════════════════════════════════════ */}
-      <section className="border-b border-pitwall-border">
+          ══════════════════════════════════════════════════════ */}
+      <section className="border-b border-pitwall-border bg-carbon bg-grid-pattern relative overflow-hidden">
+        {/* Ambient glow backdrop */}
+        <div className="ambient-glow" />
+        {/* Subtle grid red laser glow stripe */}
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#E10600]/40 to-transparent" />
+        
         {calendarLoading ? (
           <div className="flex items-center justify-center h-48 font-mono text-sm"
             style={{ color: 'var(--pw-ghost)' }}>
             Loading season data…
           </div>
         ) : nextRace ? (
-          <div className="flex min-h-[280px]">
+          <PageReveal className="flex min-h-[300px] relative z-10">
 
             {/* ── Left 2/3 — Race info + countdown ──────────────────── */}
-            <div className="flex-[2] flex flex-col justify-center px-8 py-8 border-r border-pitwall-border">
+            <RevealItem className="flex-[2] flex flex-col justify-center px-8 py-8 border-r border-pitwall-border backdrop-blur-[2px]">
 
               {/* Status badge (active weekend) */}
               {isActiveWeekend && (
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="w-2 h-2 rounded-full bg-status-red animate-pulse" />
-                  <span className="font-mono text-[10px] text-status-red tracking-widest uppercase border border-status-red/30 px-2 py-0.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-status-red led-dot red" />
+                  <span className="font-mono text-[10px] text-status-red tracking-widest uppercase border border-status-red/30 px-2.5 py-0.5 bg-[#E10600]/10 rounded-sm">
                     Race Weekend In Progress
                   </span>
-                  <span className="font-mono text-[10px] tracking-widest uppercase border border-pitwall-border px-2 py-0.5"
-                    style={{ color: 'var(--pw-ghost)' }}>
+                  <span className="font-mono text-[10px] tracking-widest uppercase border border-white/10 bg-white/5 px-2.5 py-0.5 rounded-sm"
+                    style={{ color: 'var(--pw-dim)' }}>
                     Round {nextRace.round}
                   </span>
                 </div>
@@ -262,47 +298,57 @@ export default function Home() {
 
               {/* Race name — centered in its column */}
               <div className="mb-1">
-                <div className="font-mono text-[10px] tracking-widest uppercase mb-2"
-                  style={{ color: 'var(--pw-ghost)' }}>
-                  {mode === 'WEEKEND_UPCOMING' ? 'Race Weekend Starting Soon' : isActiveWeekend ? 'This Weekend' : 'Next Race'} · Round {nextRace.round}
+                <div className="font-display text-[11px] tracking-widest uppercase mb-1.5 font-bold text-status-red">
+                  {mode === 'WEEKEND_UPCOMING' ? 'RACE WEEKEND STARTING SOON' : isActiveWeekend ? 'THIS WEEKEND' : 'NEXT RACE'} · ROUND {nextRace.round}
                 </div>
-                <h1 className="font-display font-bold text-5xl tracking-wide uppercase leading-none"
-                  style={{ color: 'var(--pw-text-strong)' }}>
-                  {heroFlag} {nextRace.raceName}
+                <h1 className="font-display font-extrabold text-5xl tracking-wide uppercase leading-none text-pitwall-text-strong flex items-center">
+                  <span className="inline-block font-mono font-bold text-2.5xl bg-status-red px-3.5 py-1 skew-x-[-12deg] text-white mr-4 align-middle shadow-md border-r-2 border-r-white/20 select-none">
+                    <span className="inline-block skew-x-[12deg]">{heroFlag}</span>
+                  </span>
+                  <span className="align-middle">{nextRace.raceName}</span>
                 </h1>
-                <div className="font-display text-base tracking-widest uppercase mt-2"
-                  style={{ color: 'var(--pw-dim)' }}>
+                <div className="font-display text-base tracking-widest font-semibold uppercase mt-2 text-pitwall-dim">
                   {nextRace.Circuit?.Location?.country ?? ''} · {nextRace.Circuit?.circuitName ?? ''}
                 </div>
-                <div className="font-mono text-xs mt-1" style={{ color: 'var(--pw-ghost)' }}>
-                  Race: {nextRace.date}
+                <div className="font-mono text-xs mt-1.5 text-pitwall-dim font-medium">
+                  RACE START: {nextRace.date}
                 </div>
               </div>
 
               {/* Last session tag (active weekend) */}
               {lastSession && (
                 <div className="mt-3">
-                  <span className="font-mono text-[10px] text-status-green border border-status-green/30 px-2 py-0.5">
-                    ✓ {lastSession.label} COMPLETE
+                  <span className="font-mono text-[10px] text-status-green border border-status-green/30 bg-[#00D2BE]/10 px-2 py-0.5 rounded-sm font-semibold">
+                    ✓ {lastSession.label?.toUpperCase()} COMPLETE
                   </span>
                 </div>
               )}
 
               {/* Countdown */}
               <div className="mt-6">
-                {nextSession && countdown && (
+                {nextSession && countdownSeconds !== null && (
                   <div>
-                    <div className="font-mono text-[10px] tracking-widest uppercase mb-3"
-                      style={{ color: 'var(--pw-ghost)' }}>
-                      {isActiveWeekend ? `Next — ${nextSession.label}` : `${nextSession.label} in`}
+                    <div className="font-mono text-[10px] tracking-widest uppercase mb-3 text-pitwall-dim">
+                      {isActiveWeekend ? `NEXT SESSION: ${nextSession.label?.toUpperCase()}` : `${nextSession.label?.toUpperCase()} COUNTDOWN`}
                     </div>
-                    <CountdownBlock countdown={countdown} />
+                    <div className="font-mono text-3xl font-black text-pitwall-text-strong tracking-wider bg-white/5 border border-white/10 px-4 py-2.5 rounded-sm inline-block shadow-inner backdrop-blur-md">
+                      {formatCountdown(countdownSeconds)}
+                    </div>
                   </div>
                 )}
-                {!nextSession && countdown && <CountdownBlock countdown={countdown} label="Race in" />}
-                {nextSession && !countdown && (
-                  <div className="font-display text-sm tracking-widest uppercase animate-pulse text-status-red">
-                    {nextSession.label} Starting Now
+                {!nextSession && countdownSeconds !== null && (
+                  <div>
+                    <div className="font-mono text-[10px] tracking-widest uppercase mb-3 text-pitwall-dim">
+                      RACE COUNTDOWN
+                    </div>
+                    <div className="font-mono text-3xl font-black text-pitwall-text-strong tracking-wider bg-white/5 border border-white/10 px-4 py-2.5 rounded-sm inline-block shadow-inner backdrop-blur-md">
+                      {formatCountdown(countdownSeconds)}
+                    </div>
+                  </div>
+                )}
+                {nextSession && countdownSeconds === null && (
+                  <div className="font-display text-sm tracking-widest uppercase animate-pulse text-status-red font-black">
+                    {nextSession.label} STARTING NOW
                   </div>
                 )}
               </div>
@@ -311,21 +357,21 @@ export default function Home() {
               <div className="flex items-center gap-3 mt-6">
                 {isActiveWeekend && (
                   <Link to="/live"
-                    className="font-mono text-xs tracking-widest uppercase px-4 py-2 border border-status-red/50 text-status-red hover:bg-status-red hover:text-white transition-colors">
-                    Open Live Timing →
+                    className="font-display font-bold text-xs tracking-widest uppercase px-5 py-2.5 bg-status-red text-white hover:brightness-110 active:scale-[0.97] transition-all rounded-sm shadow-lg shadow-status-red/20 flex-shrink-0">
+                    OPEN LIVE TIMING →
                   </Link>
                 )}
                 <button
                   onClick={() => openModal(nextRace, circuitData)}
-                  className="font-mono text-xs tracking-widest uppercase px-4 py-2 border border-pitwall-border hover:border-pitwall-muted transition-colors"
-                  style={{ color: 'var(--pw-dim)' }}>
-                  Full Weekend Details →
+                  className="font-display font-bold text-xs tracking-widest uppercase px-5 py-2.5 border border-pitwall-border hover:border-pitwall-ghost bg-pitwall-surface hover:bg-pitwall-surface-2 text-pitwall-text-strong active:scale-[0.97] transition-all rounded-sm flex-shrink-0"
+                >
+                  FULL WEEKEND DETAILS
                 </button>
               </div>
-            </div>
+            </RevealItem>
 
             {/* ── Right 1/3 — Track map + stats ─────────────────────── */}
-            <div className="flex-1 flex flex-col p-6 gap-0 justify-center" style={{ minWidth: 260, maxWidth: 380 }}>
+            <RevealItem className="flex-1 flex flex-col p-6 gap-0 justify-center" style={{ minWidth: 260, maxWidth: 380 }}>
               {circuitData ? (
                 <TrackMap circuitData={circuitData} compact showStats />
               ) : (
@@ -335,8 +381,8 @@ export default function Home() {
                   </span>
                 </div>
               )}
-            </div>
-          </div>
+            </RevealItem>
+          </PageReveal>
 
         ) : (
           <div className="flex items-center justify-center h-48">
@@ -355,11 +401,11 @@ export default function Home() {
 
       {/* ══════════════════════════════════════════════════════
           LOWER BODY — 3 columns: [standings] [podium] [upcoming]
-      ══════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-3 divide-x divide-pitwall-border">
+          ══════════════════════════════════════════════════════ */}
+      <PageReveal className="grid grid-cols-3 divide-x divide-pitwall-border">
 
         {/* ── Col 1: Championship standings (clickable) ─────── */}
-        <div className="flex flex-col">
+        <RevealItem className="flex flex-col">
 
           {/* Weekend schedule strip (if active weekend) */}
           {isWeekend && weekendSessions.length > 0 && (
@@ -380,14 +426,10 @@ export default function Home() {
                 className="w-full text-left p-5 group transition-colors hover:bg-pitwall-surface/40"
               >
                 <div className="flex items-center justify-between mb-3">
-                  <span className="font-mono text-[10px] tracking-widest uppercase"
-                    style={{ color: 'var(--pw-ghost)' }}>
+                  <span className="font-mono text-[10px] tracking-widest uppercase text-pitwall-dim">
                     Drivers Championship
                   </span>
-                  <span className="font-mono text-[10px] tracking-widest transition-colors"
-                    style={{ color: 'var(--pw-ghost)' }}
-                    onMouseEnter={(e) => e.target.style.color = 'var(--pw-red)'}
-                    onMouseLeave={(e) => e.target.style.color = 'var(--pw-ghost)'}>
+                  <span className="font-mono text-[10px] tracking-widest transition-colors text-pitwall-dim hover:text-status-red">
                     VIEW ALL →
                   </span>
                 </div>
@@ -403,7 +445,7 @@ export default function Home() {
                   </span>
                   <span className="font-mono text-xl ml-auto font-bold"
                     style={{ color: 'var(--pw-text-strong)' }}>
-                    {p1Driver?.points}
+                    <AnimatedNumber value={parseFloat(p1Driver?.points ?? 0)} />
                     <span className="text-xs ml-1" style={{ color: 'var(--pw-ghost)' }}>pts</span>
                   </span>
                 </div>
@@ -421,10 +463,10 @@ export default function Home() {
                 {p2Driver && (
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>
-                      P2: <span style={{ color: 'var(--pw-text)' }}>{p2Driver?.Driver?.code}</span>
+                      P2: <span style={{ color: getTeamColour(p2Driver?.Constructors?.[0]?.name ?? '') }}>{p2Driver?.Driver?.code}</span>
                     </span>
                     <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>
-                      {p2Driver?.points} pts
+                      <AnimatedNumber value={parseFloat(p2Driver?.points ?? 0)} /> pts
                       <span className="ml-1" style={{ color: 'var(--pw-ghost)' }}>
                         (−{(maxPts - parseFloat(p2Driver?.points ?? 0)).toFixed(0)})
                       </span>
@@ -444,12 +486,12 @@ export default function Home() {
                           style={{ color: 'var(--pw-ghost)' }}>{i + 1}</span>
                         <div className="w-0.5 h-3 rounded flex-shrink-0" style={{ background: col }} />
                         <span className="font-mono text-xs w-10 flex-shrink-0"
-                          style={{ color: 'var(--pw-text)' }}>{entry.Driver?.code}</span>
+                          style={{ color: col }}>{entry.Driver?.code}</span>
                         <div className="flex-1 h-px" style={{ background: 'var(--pw-border)' }}>
                           <div className="h-full" style={{ width: `${pct}%`, background: col, opacity: 0.7 }} />
                         </div>
                         <span className="font-mono text-[10px] w-8 text-right flex-shrink-0"
-                          style={{ color: 'var(--pw-dim)' }}>{entry.points}</span>
+                          style={{ color: 'var(--pw-dim)' }}><AnimatedNumber value={parseFloat(entry.points ?? 0)} /></span>
                       </div>
                     )
                   })}
@@ -457,20 +499,16 @@ export default function Home() {
               </button>
             </section>
           )}
-        </div>
+        </RevealItem>
 
         {/* ── Col 2: Last race podium ────────────────────────── */}
-        <div className="p-5">
+        <RevealItem className="p-5">
           <div className="flex items-center justify-between mb-4">
-            <span className="font-mono text-[10px] tracking-widest uppercase"
-              style={{ color: 'var(--pw-ghost)' }}>
+            <span className="font-mono text-[10px] tracking-widest uppercase text-pitwall-dim">
               Last Race{lastRound ? ` — ${lastRound.raceName?.replace(' Grand Prix', '')} GP` : ''}
             </span>
             <Link to="/results"
-              className="font-mono text-[10px] tracking-widest transition-colors"
-              style={{ color: 'var(--pw-ghost)' }}
-              onMouseEnter={(e) => e.target.style.color = 'var(--pw-red)'}
-              onMouseLeave={(e) => e.target.style.color = 'var(--pw-ghost)'}>
+              className="font-mono text-[10px] tracking-widest transition-colors text-pitwall-dim hover:text-status-red">
               RESULTS →
             </Link>
           </div>
@@ -487,12 +525,11 @@ export default function Home() {
               {pastRaces.length === 0 ? 'Season not started' : 'Select Results → load race'}
             </div>
           )}
-        </div>
+        </RevealItem>
 
         {/* ── Col 3: Upcoming races (clickable) ─────────────── */}
-        <div className="p-5">
-          <div className="font-mono text-[10px] tracking-widest uppercase mb-4"
-            style={{ color: 'var(--pw-ghost)' }}>
+        <RevealItem className="p-5">
+          <div className="font-mono text-[10px] tracking-widest uppercase mb-4 text-pitwall-dim">
             Upcoming Races
           </div>
           {futureRaces.length === 0 ? (
@@ -508,8 +545,8 @@ export default function Home() {
               })}
             </div>
           )}
-        </div>
-      </div>
+        </RevealItem>
+      </PageReveal>
 
       {/* Race detail modal */}
       {modalRace && (

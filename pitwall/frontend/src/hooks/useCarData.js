@@ -1,54 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
-
-const OPENF1_BASE = 'https://api.openf1.org/v1'
+import { useState } from 'react'
 
 /**
- * Fetches car telemetry data from OpenF1 for a given driver.
- * Polls every 4 seconds during a live session.
- * Falls back to a fixed past session for testing when not live.
+ * useCarData — PITWALL
  *
- * @param {number|string} driverNumber
- * @param {string|number} sessionKey  - null = use latest
- * @param {boolean} isLive
+ * NOTE: OpenF1 now requires a paid subscription (401 for all requests as of mid-2026).
+ * Live car telemetry (speed, rpm, gear, throttle, brake, drs) comes from
+ * the F1 SignalR feed via the backend WebSocket (carData in useF1Store).
+ *
+ * This hook is kept as a no-op for compatibility — data comes from the store instead.
  */
-export function useCarData(driverNumber, sessionKey = null, isLive = false) {
-  const [data, setData]       = useState([])
-  const [loading, setLoading] = useState(false)
-  const timerRef = useRef(null)
-
-  useEffect(() => {
-    if (!driverNumber) { setData([]); return }
-
-    const key  = sessionKey ?? 'latest'
-    const url  = `${OPENF1_BASE}/car_data?driver_number=${driverNumber}&session_key=${key}&speed%3E100=true`
-
-    async function fetchData() {
-      setLoading(true)
-      try {
-        const res  = await fetch(url)
-        const json = await res.json()
-        if (Array.isArray(json)) {
-          // Keep last 300 data points (~2 laps) for chart performance
-          setData(json.slice(-300))
-        }
-      } catch {
-        // Network error — keep last data
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchData()
-
-    // Poll every 4s when live
-    if (isLive) {
-      timerRef.current = setInterval(fetchData, 4000)
-    }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
-  }, [driverNumber, sessionKey, isLive])
-
-  return { data, loading }
+export function useCarData(_driverNumber, _sessionKey = null, _isLive = false) {
+  // OpenF1 unavailable — live telemetry comes from SignalR via useF1Store.carData
+  return { data: [], loading: false }
 }

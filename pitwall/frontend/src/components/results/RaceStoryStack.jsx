@@ -44,27 +44,27 @@ function buildFallbackStory(raceData) {
 
 function StoryCard({ event, index, total }) {
   return (
-    <div className="flex flex-col gap-3 p-4 bg-[#0d0d0d] border border-[#1e1e1e] w-full">
+    <div className="flex flex-col gap-3 p-4 bg-pitwall-surface border border-pitwall-border w-full">
       {/* Lap badge */}
       {event.lap && (
-        <div className="font-mono text-[10px] text-[#444] tracking-widest">
+        <div className="font-mono text-[10px] text-pitwall-dim tracking-widest">
           LAP {event.lap}
         </div>
       )}
       {/* Icon + title */}
       <div className="flex items-center gap-2">
         <span className="text-2xl leading-none">{event.icon}</span>
-        <span className="font-mono text-sm font-bold tracking-widest text-white">{event.title}</span>
+        <span className="font-mono text-sm font-bold tracking-widest text-pitwall-text-strong">{event.title}</span>
       </div>
       {/* Description */}
-      <p className="font-body text-xs text-[#666] leading-relaxed">{event.desc}</p>
+      <p className="font-body text-xs text-pitwall-text leading-relaxed">{event.desc}</p>
       {/* Slide indicator */}
       <div className="flex gap-1 mt-1">
         {[...Array(total)].map((_, i) => (
           <div
             key={i}
             className="h-[2px] flex-1 rounded-full transition-colors duration-300"
-            style={{ backgroundColor: i === index ? '#E8002D' : '#252525' }}
+            style={{ backgroundColor: i === index ? 'var(--pw-red)' : 'var(--pw-border)' }}
           />
         ))}
       </div>
@@ -92,33 +92,15 @@ export default function RaceStoryStack({ raceData, sessionKey, onClose }) {
     }, 100)
   }, [])
 
-  // Fetch from OpenF1 race_control if sessionKey available, otherwise use fallback
+  // NOTE: OpenF1 race_control now requires paid subscription (returns 401).
+  // We fall back immediately to the Jolpica/results-derived story events.
   useEffect(() => {
     let cancelled = false
 
     async function load() {
       setLoading(true)
 
-      let story = []
-      if (sessionKey) {
-        try {
-          const res  = await fetch(`https://api.openf1.org/v1/race_control?session_key=${sessionKey}`)
-          const data = await res.json()
-          const notable = data.filter((m) =>
-            (m.category === 'Flag' && NOTABLE_FLAGS.has(m.flag)) ||
-            m.category === 'SafetyCar'
-          ).slice(0, 8)
-
-          story = notable.map((m) => ({
-            icon: getIcon(m.flag, m.category),
-            lap:  m.lap_number ?? null,
-            title: m.flag ?? m.category ?? 'RACE CONTROL',
-            desc:  m.message ?? `${m.flag} flag — Lap ${m.lap_number ?? '?'}`,
-          }))
-        } catch (_) {
-          story = []
-        }
-      }
+      let story = buildFallbackStory(raceData).slice(0, 8)
 
       // Supplement / fallback with results-derived events
       if (story.length < 3) {
@@ -159,9 +141,9 @@ export default function RaceStoryStack({ raceData, sessionKey, onClose }) {
 
   if (loading) {
     return (
-      <div className="mt-4 border border-[#1e1e1e] p-4 bg-[#0d0d0d]">
-        <div className="flex items-center gap-2 font-mono text-[11px] text-[#444]">
-          <span className="animate-spin inline-block w-3 h-3 border border-[#333] border-t-[#666] rounded-full" />
+      <div className="mt-4 border border-pitwall-border p-4 bg-pitwall-surface">
+        <div className="flex items-center gap-2 font-mono text-[11px] text-pitwall-dim">
+          <span className="animate-spin inline-block w-3 h-3 border border-pitwall-border border-t-status-red rounded-full" />
           Loading race story…
         </div>
       </div>
@@ -173,10 +155,10 @@ export default function RaceStoryStack({ raceData, sessionKey, onClose }) {
   return (
     <div className="mt-4">
       <div className="flex items-center justify-between mb-2">
-        <span className="font-mono text-[10px] text-[#444] tracking-widest uppercase">Race Story</span>
+        <span className="font-mono text-[10px] text-pitwall-dim tracking-widest uppercase">Race Story</span>
         <button
           onClick={onClose}
-          className="font-mono text-[10px] text-[#333] hover:text-[#666]"
+          className="font-mono text-[10px] text-pitwall-ghost hover:text-pitwall-dim"
         >
           ✕ Close
         </button>
@@ -186,7 +168,7 @@ export default function RaceStoryStack({ raceData, sessionKey, onClose }) {
       <StoryCard event={events[current]} index={current} total={events.length} />
 
       {/* Progress bar */}
-      <div className="h-px bg-[#1a1a1a] mt-2 overflow-hidden">
+      <div className="h-px bg-pitwall-border mt-2 overflow-hidden">
         <div
           className="h-full bg-status-red transition-none"
           style={{ width: `${progress}%` }}
@@ -197,16 +179,16 @@ export default function RaceStoryStack({ raceData, sessionKey, onClose }) {
       <div className="flex items-center justify-between mt-2">
         <button
           onClick={() => goTo((current - 1 + events.length) % events.length)}
-          className="font-mono text-[10px] text-[#444] hover:text-[#888] px-2 py-1 border border-[#252525] transition-colors"
+          className="font-mono text-[10px] text-pitwall-dim hover:text-pitwall-text px-2 py-1 border border-pitwall-border transition-colors bg-pitwall-surface"
         >
           ← PREV
         </button>
-        <span className="font-mono text-[10px] text-[#333]">
+        <span className="font-mono text-[10px] text-pitwall-ghost">
           {current + 1} / {events.length}
         </span>
         <button
           onClick={() => goTo((current + 1) % events.length)}
-          className="font-mono text-[10px] text-[#444] hover:text-[#888] px-2 py-1 border border-[#252525] transition-colors"
+          className="font-mono text-[10px] text-pitwall-dim hover:text-pitwall-text px-2 py-1 border border-pitwall-border transition-colors bg-pitwall-surface"
         >
           NEXT →
         </button>

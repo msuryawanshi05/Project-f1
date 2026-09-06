@@ -23,14 +23,14 @@ export default function Settings() {
     <div className="min-h-full bg-pitwall-bg max-w-2xl mx-auto">
       {/* Header */}
       <div className="border-b border-pitwall-border px-6 py-4">
-        <h1 className="font-display font-bold text-3xl tracking-widest text-white uppercase">Settings</h1>
+        <h1 className="font-display font-bold text-3xl tracking-widest text-pitwall-text-strong uppercase">Settings</h1>
       </div>
 
       <div className="divide-y divide-pitwall-border">
 
         {/* Favourite Drivers */}
         <section className="px-6 py-6">
-          <div className="font-mono text-xs text-pitwall-ghost tracking-widest uppercase mb-4">
+          <div className="font-mono text-xs text-pitwall-dim tracking-widest uppercase mb-4">
             Favourite Drivers
           </div>
           <div className="flex flex-wrap gap-2">
@@ -40,11 +40,11 @@ export default function Settings() {
                 <button
                   key={number}
                   onClick={() => toggleFav(number)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 border transition-colors font-mono text-xs"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 border transition-all font-mono text-xs active:scale-[0.96]"
                   style={{
-                    borderColor: isFav ? colour : '#333',
+                    borderColor: isFav ? colour : 'var(--pw-border)',
                     backgroundColor: isFav ? `${colour}22` : 'transparent',
-                    color: isFav ? colour : '#888',
+                    color: isFav ? colour : 'var(--pw-dim)',
                   }}
                 >
                   <span
@@ -116,7 +116,7 @@ export default function Settings() {
         <section className="px-6 py-6 flex items-center justify-between">
           <div>
             <div className="font-display font-semibold text-sm text-pitwall-text tracking-wide">Dark Mode</div>
-            <div className="font-mono text-xs text-pitwall-ghost mt-0.5">Always-on cockpit theme</div>
+            <div className="font-mono text-xs text-pitwall-ghost mt-0.5">Toggle between dark and light cockpit themes</div>
           </div>
           <button
             onClick={() => updateSettings({ darkMode: !settings.darkMode })}
@@ -133,9 +133,60 @@ export default function Settings() {
           </button>
         </section>
 
+        {/* Layout Density */}
+        <section className="px-6 py-6 flex items-center justify-between">
+          <div>
+            <div className="font-display font-semibold text-sm text-pitwall-text tracking-wide">Layout Density</div>
+            <div className="font-mono text-xs text-pitwall-ghost mt-0.5">Adjust timing tower spacing density</div>
+          </div>
+          <div className="flex border border-pitwall-border bg-pitwall-surface-2 p-0.5 rounded-sm">
+            {['comfortable', 'compact'].map((d) => (
+              <button
+                key={d}
+                onClick={() => updateSettings({ density: d })}
+                className={`px-3 py-1 font-display text-[10px] tracking-widest uppercase transition-all font-bold rounded-sm ${
+                  (settings.density ?? 'comfortable') === d ? 'bg-status-red text-white shadow-sm shadow-status-red/20' : 'text-pitwall-ghost hover:text-pitwall-text-strong'
+                }`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Favorite Team Accent */}
+        <section className="px-6 py-6">
+          <div className="font-mono text-xs text-pitwall-dim tracking-widest uppercase mb-4">
+            Favorite Team Accent
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries({ 'Default Red': '#E10600', ...teamsData.teamColours }).map(([teamName, color]) => {
+              const isSelected = settings.teamAccent === color
+              return (
+                <button
+                  key={teamName}
+                  onClick={() => updateSettings({ teamAccent: color })}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 border transition-all font-mono text-xs active:scale-[0.96]"
+                  style={{
+                    borderColor: isSelected ? color : 'var(--pw-border)',
+                    backgroundColor: isSelected ? `${color}22` : 'transparent',
+                    color: isSelected ? color : 'var(--pw-dim)',
+                  }}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: color }}
+                  />
+                  {teamName.toUpperCase()}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
         {/* About */}
         <section className="px-6 py-6">
-          <div className="font-mono text-xs text-pitwall-ghost tracking-widest uppercase mb-4">About</div>
+          <div className="font-mono text-xs text-pitwall-dim tracking-widest uppercase mb-4">About</div>
           <div className="font-mono text-xs text-pitwall-dim space-y-1">
             <div className="text-pitwall-ghost">PITWALL v0.5 — Phase 5 Alpha</div>
             <div className="mt-3 font-mono text-[10px] text-pitwall-ghost/70 uppercase tracking-widest">Data sources</div>

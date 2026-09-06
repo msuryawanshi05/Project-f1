@@ -1,36 +1,34 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
+import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
 import useRaceWeekendState from '../hooks/useRaceWeekendState'
 import { useOpenF1Stints, useOpenF1Status } from '../hooks/useOpenF1'
 import DriverRow from '../components/ui/DriverRow'
 import TrackStatusBanner from '../components/ui/TrackStatusBanner'
 import TrackMap from '../components/ui/TrackMap'
+import BroadcastBanner from '../components/ui/BroadcastBanner'
+import SpotlightPanel from '../components/ui/SpotlightPanel'
 import { EmptyState } from '../components/ui/EmptyState'
-import { getTeamColour } from '../utils/driverUtils'
+import { getTeamColour, formatCountdown, formatSessionTime, parseGapToSeconds } from '../utils/driverUtils'
 import StrategyTab from './live/StrategyTab'
 import TelemetryTab from './live/TelemetryTab'
 import RadioTab from './live/RadioTab'
 
 // ── Countdown inline ──────────────────────────────────────────────────────────
-import { useState as useCountState, useEffect } from 'react'
-function useCountdown(targetDt) {
-  const [diff, setDiff] = useCountState(null)
+function useCountdownSeconds(targetDt) {
+  const [seconds, setSeconds] = useState(null)
   useEffect(() => {
     if (!targetDt) return
     const tick = () => {
       const ms = targetDt - Date.now()
-      if (ms <= 0) { setDiff(null); return }
-      setDiff({
-        h: Math.floor(ms / 3600000),
-        m: Math.floor((ms % 3600000) / 60000),
-        s: Math.floor((ms % 60000) / 1000),
-      })
+      if (ms <= 0) { setSeconds(null); return }
+      setSeconds(Math.floor(ms / 1000))
     }
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [targetDt])
-  return diff
+  return seconds
 }
 
 // ── Weather tile ───────────────────────────────────────────────────────────────────
@@ -59,7 +57,7 @@ function SessionRow({ session }) {
   const label = session.done ? '✓' : session.live ? '●' : '○'
 
   const timeStr = session.dt
-    ? session.dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) + ' IST'
+    ? formatSessionTime(session.dt, null, true)
     : '—'
 
   return (
@@ -76,7 +74,7 @@ function SessionRow({ session }) {
 // ── Weekend side panel ────────────────────────────────────────────────────────
 function WeekendPanel({ weekendState, weather }) {
   const { mode, currentRace, nextSession, weekendSessions, circuitData } = weekendState
-  const countdown = useCountdown(nextSession?.targetDt)
+  const countdownSeconds = useCountdownSeconds(nextSession?.targetDt)
 
   if (mode === 'SESSION_LIVE') {
     // Live weather panel
@@ -111,7 +109,7 @@ function WeekendPanel({ weekendState, weather }) {
       <div className="px-4 pt-4 pb-2">
         <div className="font-mono text-[9px] text-pitwall-ghost tracking-widest uppercase mb-1">{headerLabel}</div>
         {currentRace && (
-          <div className="font-display font-bold text-sm text-white tracking-wide uppercase leading-tight">
+          <div className="font-display font-bold text-sm text-pitwall-text-strong tracking-wide uppercase leading-tight">
             {currentRace.raceName?.replace(' Grand Prix', ' GP')}
           </div>
         )}
@@ -139,9 +137,9 @@ function WeekendPanel({ weekendState, weather }) {
             <span className="font-display text-xs text-pitwall-dim uppercase tracking-wider">
               {nextSession.label}
             </span>
-            {countdown && (
-              <span className="font-mono text-xs text-pitwall-text tabular-nums">
-                {String(countdown.h).padStart(2, '0')}:{String(countdown.m).padStart(2, '0')}:{String(countdown.s).padStart(2, '0')}
+            {countdownSeconds !== null && (
+              <span className="font-mono text-xs text-pitwall-text-strong tabular-nums font-semibold">
+                {formatCountdown(countdownSeconds)}
               </span>
             )}
           </div>
@@ -166,7 +164,7 @@ function WeekendPanel({ weekendState, weather }) {
 // ── Timing tower left panel info ──────────────────────────────────────────────
 function TowerEmptyState({ weekendState }) {
   const { mode, currentRace, nextSession, lastSession, circuitData } = weekendState
-  const countdown = useCountdown(nextSession?.targetDt)
+  const countdownSeconds = useCountdownSeconds(nextSession?.targetDt)
 
   if (mode === 'WEEKEND_BETWEEN_SESSIONS' || mode === 'WEEKEND_SESSION_SOON') {
     return (
@@ -179,19 +177,19 @@ function TowerEmptyState({ weekendState }) {
             ✓ {lastSession.label} complete
           </div>
         )}
-        {nextSession && countdown && (
+        {nextSession && countdownSeconds !== null && (
           <div className="flex flex-col items-center gap-1 mt-2">
             <div className="font-mono text-[10px] uppercase tracking-widest"
               style={{ color: 'var(--pw-ghost)' }}>
               {nextSession.label} starts in
             </div>
-            <div className="font-mono text-2xl tabular-nums"
+            <div className="font-mono text-xl font-bold tabular-nums"
               style={{ color: 'var(--pw-text-strong)' }}>
-              {String(countdown.h).padStart(2, '0')}:{String(countdown.m).padStart(2, '00')}:{String(countdown.s).padStart(2, '00')}
+              {formatCountdown(countdownSeconds)}
             </div>
           </div>
         )}
-        {nextSession && !countdown && (
+        {nextSession && countdownSeconds === null && (
           <div className="font-display text-sm text-status-red tracking-widest uppercase animate-pulse">
             {nextSession.label} starting soon
           </div>
@@ -216,7 +214,7 @@ function TowerEmptyState({ weekendState }) {
           <div className="font-mono text-xs text-pitwall-dim">{circuitData.circuit}</div>
         )}
         {daysUntil !== null && (
-          <div className="font-mono text-2xl text-white mt-2">
+          <div className="font-mono text-2xl text-pitwall-text-strong mt-2">
             {daysUntil}d
             <span className="text-pitwall-ghost text-sm ml-1">until {nextSession?.label}</span>
           </div>
@@ -260,8 +258,18 @@ const TABS = ['TOWER', 'STRATEGY', 'TELEMETRY', 'RADIO']
 
 // ── Live page ─────────────────────────────────────────────────────────────────
 export default function Live() {
-  const [activeTab, setActiveTab]         = useState('TOWER')
+  const [activeTab, setActiveTab]           = useState('TOWER')
   const [expandedDriver, setExpandedDriver] = useState(null)
+  const [showSidebar, setShowSidebar]       = useState(true)
+
+  // Expose setActiveTab to window so keyboard shortcuts can switch tabs
+  useEffect(() => {
+    window.__pitwall_setTab = (tab) => {
+      const normalized = tab.toUpperCase()
+      if (TABS.includes(normalized)) setActiveTab(normalized)
+    }
+    return () => { delete window.__pitwall_setTab }
+  }, [])
 
   const session     = useF1Store((s) => s.session)
   const trackStatus = useF1Store((s) => s.trackStatus)
@@ -270,16 +278,16 @@ export default function Live() {
   const tyres       = useF1Store((s) => s.tyres)
   const weather     = useF1Store((s) => s.weather)
   const settings    = useF1Store((s) => s.settings)
+  const raceControl = useF1Store((s) => s.raceControl)
 
   const weekendState = useRaceWeekendState()
   const isLive = weekendState.mode === 'SESSION_LIVE'
 
-  // OpenF1 stints — used POST-SESSION for strategy analysis.
-  // During live sessions SignalR provides real-time tyre data via TimingAppData.
-  // Historical OpenF1 data is free with no auth (real-time requires paid plan).
-  const sessionKey = useF1Store((s) => s.currentSessionKey)
-  const { stints: openf1Stints } = useOpenF1Stints(!isLive ? sessionKey : null)
-  const { reachable: openf1Reachable } = useOpenF1Status()
+  // OpenF1 stints — NOTE: OpenF1 now requires paid subscription (returns 401).
+  // Stints data during live sessions comes from the SignalR tyre feed instead.
+  // When OpenF1 free tier returns, this will work for post-session analysis.
+  const { stints: openf1Stints } = useOpenF1Stints(null)  // disabled
+  const { reachable: openf1Reachable } = useOpenF1Status() // always false
 
   // Memoised derived data
   const sortedTiming = useMemo(() =>
@@ -338,65 +346,61 @@ export default function Live() {
   const isQ3 = sessionName.includes('Q3')
   const q1Cut = 15, q2Cut = 10
 
-  const RowRenderer = useCallback(({ index }) => {
-    const t          = sortedTiming[index]
-    const driverNum  = t?.driver_number ?? t?.number
-    const driver     = driversByNumber[driverNum] ?? { number: driverNum }
-    const tyre       = tyresByDriver[driverNum]
-    const teamColour = getTeamColour(driverNum, drivers)
-    const isFav      = settings.favouriteDrivers?.includes(String(driverNum))
+  const colWidths = {
+    pos: 'w-[6%] min-w-[28px]',
+    drv: 'w-[12%] min-w-[58px] pl-1',
+    gap: 'w-[14%] min-w-[64px]',
+    lastLap: 'w-[14%] min-w-[70px]',
+    s1: 'w-[11%] min-w-[52px] text-center',
+    s2: 'w-[11%] min-w-[52px] text-center',
+    s3: 'w-[11%] min-w-[52px] text-center',
+    tyre: 'w-[8%] min-w-[36px] text-center',
+    pit: 'w-[5%] min-w-[22px] text-center',
+  }
 
-    const showQ1Div = isQ  && !isQ2 && index === q1Cut - 1
-    const showQ2Div = isQ2 && !isQ3 && index === q2Cut - 1
-    const showQ3Div = isQ3 && index === 9
+  const currentLap = session.lap ?? sortedTiming[0]?.lap ?? (sortedTiming.length > 0 ? 1 : null)
+  const totalLaps = session.total_laps ?? weekendState.circuitData?.laps ?? 53
+  const isSessionActive = isLive || session.phase === 'LIVE' || session.phase === 'RACE' || sortedTiming.length > 0
 
-    return (
-      <div>
-        <DriverRow
-          driver={driver}
-          timing={t}
-          tyre={tyre}
-          teamColour={teamColour}
-          isFavourite={isFav}
-          expanded={expandedDriver === driverNum}
-          onExpand={handleExpand}
-        />
-        {(showQ1Div || showQ2Div || showQ3Div) && (
-          <div className="flex items-center gap-2 px-4 py-1 bg-[#0a0a0a]">
-            <div className="flex-1 h-px bg-pitwall-border" />
-            <span className="font-mono text-[10px] text-pitwall-ghost tracking-widest">
-              {showQ3Div ? 'Q3 OUT' : showQ2Div ? 'Q2 OUT' : 'Q1 OUT'}
-            </span>
-            <div className="flex-1 h-px bg-pitwall-border" />
-          </div>
-        )}
-      </div>
-    )
-  }, [sortedTiming, driversByNumber, tyresByDriver, drivers, settings, expandedDriver, handleExpand, isQ, isQ2, isQ3])
-
-  // Session header text — smart based on mode
-  const sessionHeaderTitle = isLive
-    ? (session.name ?? 'SESSION')
+  const sessionHeaderTitle = isSessionActive
+    ? (session.name ? session.name.toUpperCase() : 'RACE')
     : weekendState.currentRace?.raceName ?? 'NO SESSION'
 
-  const sessionHeaderRight = isLive
-    ? ((session.phase === 'RACE' || session.phase === 'LIVE')
-        ? `LAP ${session.lap ?? '—'} / ${session.total_laps ?? weekendState.circuitData?.laps ?? '—'}`
-        : session.phase)
+  const sessionHeaderRight = isSessionActive
+    ? `LAP ${currentLap ?? '—'} / ${totalLaps ?? '—'}`
     : weekendState.mode === 'WEEKEND_BETWEEN_SESSIONS' || weekendState.mode === 'WEEKEND_SESSION_SOON'
-    ? `LAP 0 / ${weekendState.circuitData?.laps ?? '—'}`
+    ? `LAP 0 / ${totalLaps ?? '—'}`
     : weekendState.nextSession?.label ?? 'UPCOMING'
 
   return (
     <div className="h-full flex flex-col" style={{ background: 'var(--pw-bg)' }}>
 
-      {/* Sub-tab bar */}
-      <div className="flex border-b border-pitwall-border" style={{ background: 'var(--pw-surface)' }}>
+      {/* Sub-tab bar — role=tablist with arrow key navigation */}
+      <div
+        role="tablist"
+        aria-label="Live dashboard views"
+        className="flex border-b border-pitwall-border"
+        style={{ background: 'var(--pw-surface)' }}
+        onKeyDown={(e) => {
+          const idx = TABS.indexOf(activeTab)
+          if (e.key === 'ArrowRight') {
+            e.preventDefault()
+            setActiveTab(TABS[(idx + 1) % TABS.length])
+          } else if (e.key === 'ArrowLeft') {
+            e.preventDefault()
+            setActiveTab(TABS[(idx - 1 + TABS.length) % TABS.length])
+          }
+        }}
+      >
         {TABS.map((tab) => (
           <button
             key={tab}
+            id={`${tab.toLowerCase()}-tab`}
+            role="tab"
+            aria-selected={activeTab === tab}
+            aria-controls={`${tab.toLowerCase()}-panel`}
+            tabIndex={activeTab === tab ? 0 : -1}
             onClick={() => setActiveTab(tab)}
-            aria-label={`Switch to ${tab} view`}
             className={`px-4 md:px-5 py-2 font-display text-xs tracking-widest uppercase transition-colors ${
               activeTab === tab
                 ? 'border-b-2 border-status-red'
@@ -408,13 +412,11 @@ export default function Live() {
           </button>
         ))}
         <div className="ml-auto flex items-center gap-3 px-4">
-          {/* OpenF1 reachability indicator */}
+          {/* OpenF1 indicator — subscription required since mid-2026 */}
           <div className="flex items-center gap-1"
-            title={openf1Reachable
-              ? 'OpenF1 reachable — historical data available (post-session analysis)'
-              : 'OpenF1 unreachable — check internet connection'}>
-            <span className={`w-1.5 h-1.5 rounded-full ${openf1Reachable ? 'bg-status-green' : 'bg-pitwall-ghost'}`} />
-            <span className="font-mono text-[10px]" style={{ color: 'var(--pw-ghost)' }}>OF1</span>
+            title="OpenF1 requires paid subscription — live timing via F1 SignalR, historical data via Jolpica">
+            <span className="w-1.5 h-1.5 rounded-full bg-pitwall-ghost opacity-40" aria-hidden="true" />
+            <span className="font-mono text-[10px] opacity-40" style={{ color: 'var(--pw-ghost)' }}>OF1</span>
           </div>
           <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>{session.clock ?? '—'}</span>
         </div>
@@ -427,8 +429,12 @@ export default function Live() {
       {activeTab === 'TOWER' && (
         <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
-          {/* Timing tower — full width on md, 58% on lg+ */}
-          <div className="flex flex-col border-b lg:border-b-0 lg:border-r border-pitwall-border overflow-hidden w-full lg:w-[58%]">
+          {/* Timing tower — full width on md, dynamically expands if sidebar is hidden */}
+          <SpotlightPanel 
+            className={`flex flex-col border-b lg:border-b-0 border-pitwall-border overflow-hidden w-full transition-all duration-300 ${
+              showSidebar ? 'lg:w-[58%] lg:border-r' : 'lg:w-full border-r-0'
+            }`}
+          >
 
             {/* Session header */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-pitwall-border"
@@ -437,91 +443,176 @@ export default function Live() {
                 style={{ color: 'var(--pw-text)' }}>
                 {sessionHeaderTitle}
               </span>
-              <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>
-                {sessionHeaderRight}
-              </span>
-            </div>
-
-            {/* Column headers — only shown when live */}
-            {isLive && (
-              <div
-                className="flex items-center h-7 bg-[#0d0d0d] border-b border-pitwall-border px-0"
-                style={{ borderBottom: '1px solid #1a1a1a' }}
-              >
-                <div className="w-[3px]" />
-                <div className="w-10 text-center font-mono text-[10px] text-pitwall-ghost tracking-widest">POS</div>
-                <div className="w-7 font-mono text-[10px] text-pitwall-ghost tracking-widest">FLG</div>
-                <div className="w-14 font-mono text-[10px] text-pitwall-ghost tracking-widest">DRV</div>
-                <div className="w-20 font-mono text-[10px] text-pitwall-ghost tracking-widest">GAP</div>
-                <div className="w-24 font-mono text-[10px] text-pitwall-ghost tracking-widest">LAST LAP</div>
-                <div className="w-16 font-mono text-[10px] text-pitwall-ghost tracking-widest">S1</div>
-                <div className="w-16 font-mono text-[10px] text-pitwall-ghost tracking-widest">S2</div>
-                <div className="w-16 font-mono text-[10px] text-pitwall-ghost tracking-widest">S3</div>
-                <div className="w-12 font-mono text-[10px] text-pitwall-ghost tracking-widest text-center">TYRE</div>
-                <div className="w-8 font-mono text-[10px] text-pitwall-ghost tracking-widest">PIT</div>
-              </div>
-            )}
-
-            {/* Driver rows / skeleton / smart empty state */}
-            <div className="flex-1 overflow-y-auto">
-              {sortedTiming.length === 0 ? (
-                isLive ? (
-                  <div>
-                    {Array.from({ length: 20 }).map((_, i) => <SkeletonDriverRow key={i} />)}
-                  </div>
-                ) : (
-                  <TowerEmptyState weekendState={weekendState} />
-                )
-              ) : (
-                sortedTiming.map((_, index) => (
-                  <RowRenderer
-                    key={sortedTiming[index]?.driver_number ?? sortedTiming[index]?.number ?? index}
-                    index={index}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Right panel — track map + weather/schedule */}
-          <div className="hidden lg:flex flex-col overflow-hidden" style={{ width: '42%' }}>
-            <div className="flex-1 border-b border-pitwall-border overflow-hidden"
-              style={{ background: 'var(--pw-surface)' }}>
-              <div className="px-4 pt-3 pb-1 border-b border-pitwall-border">
-                <span className="font-mono text-[10px] tracking-widest uppercase"
-                  style={{ color: 'var(--pw-ghost)' }}>
-                  {isLive ? 'Track Map' : 'Circuit'}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowSidebar(!showSidebar)}
+                  className="font-display text-[9px] tracking-widest px-2.5 py-1 border border-pitwall-border hover:border-pitwall-muted text-pitwall-ghost hover:text-pitwall-dim rounded-sm transition-all uppercase font-bold bg-white/5 active:scale-95 select-none"
+                  title={showSidebar ? "Hide sidebar map and weather" : "Show sidebar map and weather"}
+                >
+                  {showSidebar ? "◀ HIDE SIDEBAR" : "▶ SHOW SIDEBAR"}
+                </button>
+                <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>
+                  {sessionHeaderRight}
                 </span>
               </div>
-              <div className="p-4 overflow-y-auto h-full">
-                {isLive ? (
-                  /* Live session — show map + live weather */
-                  <div className="flex flex-col gap-4">
-                    <TrackMap circuitData={weekendState.circuitData} compact showStats={false} />
-                    <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase mb-2">Weather</div>
-                    {weather ? (
-                      <>
-                        <div className="grid grid-cols-2 gap-2 mb-2">
-                          <WeatherTile label="Track Temp" value={`${weather.track_temp ?? '—'}°C`} />
-                          <WeatherTile label="Air Temp"   value={`${weather.air_temp ?? '—'}°C`} />
-                          <WeatherTile label="Humidity"   value={`${weather.humidity ?? '—'}%`} />
-                          <WeatherTile label="Conditions" value={weather.rainfall ? 'WET' : 'DRY'} accent={!weather.rainfall} />
-                        </div>
-                        <div className="font-mono text-xs text-pitwall-dim">
-                          Wind: {weather.wind_speed ?? '—'} km/h{weather.wind_direction ? ` · ${weather.wind_direction}°` : ''}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="font-mono text-xs text-pitwall-ghost">Weather data not available</div>
-                    )}
+            </div>
+
+            {/* Timing table container — synchronized horizontal and vertical scroll */}
+            <div className="flex-1 flex flex-col overflow-y-auto overflow-x-auto">
+              <div className="min-w-[480px] w-full flex flex-col flex-1">
+                {/* Column headers */}
+                {(isLive || sortedTiming.length > 0) && (
+                  <div className="sticky top-0 z-10 w-full bg-pitwall-surface-2 border-b border-pitwall-border px-4 transition-all duration-300">
+                    <div className="flex items-center h-7 px-0 w-full">
+                      <div className="w-[3px]" />
+                      <div className={`${colWidths.pos} text-center font-mono text-[10px] text-pitwall-ghost tracking-widest transition-all duration-300`}>POS</div>
+                      <div className={`${colWidths.drv} font-mono text-[10px] text-pitwall-ghost tracking-widest pl-1 transition-all duration-300`}>DRV</div>
+                      <div className={`${colWidths.gap} font-mono text-[10px] text-pitwall-ghost tracking-widest transition-all duration-300`}>GAP</div>
+                      <div className={`${colWidths.lastLap} font-mono text-[10px] text-pitwall-ghost tracking-widest transition-all duration-300`}>LAST LAP</div>
+                      <div className={`${colWidths.s1} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>S1</div>
+                      <div className={`${colWidths.s2} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>S2</div>
+                      <div className={`${colWidths.s3} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>S3</div>
+                      <div className={`${colWidths.tyre} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>TYRE</div>
+                      <div className={`${colWidths.pit} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>PIT</div>
+                    </div>
                   </div>
-                ) : (
-                  /* Pre-session — smart weekend panel */
-                  <WeekendPanel weekendState={weekendState} weather={weather} />
                 )}
+
+                {/* Driver rows / skeleton / smart empty state */}
+                <div className="px-4 py-1.5 flex-1">
+                  {sortedTiming.length === 0 ? (
+                    isLive ? (
+                      <div>
+                        {Array.from({ length: 20 }).map((_, i) => <SkeletonDriverRow key={i} />)}
+                      </div>
+                    ) : (
+                      <TowerEmptyState weekendState={weekendState} />
+                    )
+                  ) : (
+                    sortedTiming.map((t, index) => {
+                      const driverNum  = t?.driver_number ?? t?.number
+                      const driver     = driversByNumber[driverNum] ?? { number: driverNum }
+                      const tyre       = tyresByDriver[driverNum]
+                      const teamColour = getTeamColour(driverNum, drivers)
+                      const isFav      = settings.favouriteDrivers?.includes(String(driverNum))
+
+                      const prevT = index > 0 ? sortedTiming[index - 1] : null
+                      const currentGapSecs = parseGapToSeconds(t?.gap_to_leader ?? t?.gap)
+                      const aheadGapSecs = prevT ? parseGapToSeconds(prevT.gap_to_leader ?? prevT.gap) : 0
+                      const gapToAhead = currentGapSecs != null && aheadGapSecs != null ? currentGapSecs - aheadGapSecs : null
+                      const isBattling = index > 0 && gapToAhead != null && gapToAhead < 1.0
+
+                      const showQ1Div = isQ  && !isQ2 && index === q1Cut - 1
+                      const showQ2Div = isQ2 && !isQ3 && index === q2Cut - 1
+                      const showQ3Div = isQ3 && index === 9
+
+                      return (
+                        <div key={driverNum ?? index}>
+                          <DriverRow
+                            driver={driver}
+                            timing={t}
+                            tyre={tyre}
+                            teamColour={teamColour}
+                            isFavourite={isFav}
+                            expanded={expandedDriver === driverNum}
+                            onExpand={() => handleExpand(driverNum)}
+                            isBattling={isBattling}
+                            showSidebar={showSidebar}
+                          />
+                          {(showQ1Div || showQ2Div || showQ3Div) && (
+                            <div className="flex items-center gap-2 px-4 py-1 bg-pitwall-surface-2">
+                              <div className="flex-1 h-px bg-pitwall-border" />
+                              <span className="font-mono text-[10px] text-pitwall-ghost tracking-widest">
+                                {showQ3Div ? 'Q3 OUT' : showQ2Div ? 'Q2 OUT' : 'Q1 OUT'}
+                              </span>
+                              <div className="flex-1 h-px bg-pitwall-border" />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
               </div>
             </div>
-          </div>
+          </SpotlightPanel>
+
+          {/* Right panel — track map + weather/schedule */}
+          {showSidebar && (
+            <div className="hidden lg:flex flex-col overflow-hidden transition-all duration-300" style={{ width: '42%' }}>
+              <div className="flex-1 border-b border-pitwall-border overflow-hidden"
+                style={{ background: 'var(--pw-surface)' }}>
+                <div className="px-4 pt-3 pb-1 border-b border-pitwall-border">
+                  <span className="font-mono text-[10px] tracking-widest uppercase"
+                    style={{ color: 'var(--pw-ghost)' }}>
+                    {isLive ? 'Track Map' : 'Circuit'}
+                  </span>
+                </div>
+                <div className="p-4 overflow-y-auto h-full">
+                  {isLive ? (
+                    /* Live session — show map + live weather */
+                    <div className="flex flex-col gap-4">
+                      <TrackMap circuitData={weekendState.circuitData} compact showStats={false} />
+                      <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase mb-2">Weather</div>
+                      {weather ? (
+                        <>
+                          <div className="grid grid-cols-2 gap-2 mb-2">
+                            <WeatherTile label="Track Temp" value={`${weather.track_temp ?? '—'}°C`} />
+                            <WeatherTile label="Air Temp"   value={`${weather.air_temp ?? '—'}°C`} />
+                            <WeatherTile label="Humidity"   value={`${weather.humidity ?? '—'}%`} />
+                            <WeatherTile label="Conditions" value={weather.rainfall ? 'WET' : 'DRY'} accent={!weather.rainfall} />
+                          </div>
+                          <div className="font-mono text-xs text-pitwall-dim">
+                            Wind: {weather.wind_speed ?? '—'} km/h{weather.wind_direction ? ` · ${weather.wind_direction}°` : ''}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="font-mono text-xs text-pitwall-ghost">Weather data not available</div>
+                      )}
+
+                      {/* Race Control Messages */}
+                      <div className="border-t border-pitwall-border/40 pt-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase">Race Control</span>
+                          <span className="font-mono text-[9px] text-pitwall-ghost">{raceControl?.length ?? 0} MSGS</span>
+                        </div>
+                        <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-1">
+                          {(!raceControl || raceControl.length === 0) ? (
+                            <div className="font-mono text-xs text-pitwall-ghost py-2 text-center">No messages yet</div>
+                          ) : (
+                            raceControl.slice(0, 10).map((msg, i) => {
+                              const isRed    = msg.flag === 'RED' || msg.category === 'SafetyCar'
+                              const isSC     = msg.flag === 'SC' || msg.flag === 'VSC'
+                              const isDrv    = msg.scope === 'Driver'
+                              const dotCls   = isRed ? 'bg-red-500' : isSC ? 'bg-yellow-400' : isDrv ? 'bg-orange-400' : 'bg-pitwall-ghost'
+                              const rowBgCls = isRed ? 'bg-red-950/30 border-red-900/40' : isSC ? 'bg-yellow-950/20 border-yellow-900/30' : isDrv ? 'bg-orange-950/15 border-orange-900/20' : 'border-pitwall-border/40'
+                              return (
+                                <div key={i} className={`flex items-start gap-2 px-2.5 py-1.5 rounded-sm border ${rowBgCls}`}>
+                                  <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotCls}`} />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                      {msg.lap && <span className="font-mono text-[9px] text-pitwall-ghost">L{msg.lap}</span>}
+                                      <span className={`font-display font-bold text-[9px] uppercase ${
+                                        isRed ? 'text-red-400' : isSC ? 'text-yellow-400' : isDrv ? 'text-orange-300' : 'text-pitwall-dim'
+                                      }`}>{msg.category || 'INFO'}</span>
+                                    </div>
+                                    <p className="font-mono text-[9.5px] text-pitwall-text-strong leading-tight break-words">{msg.message}</p>
+                                  </div>
+                                </div>
+                              )
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Pre-session — smart weekend panel */
+                    <WeekendPanel weekendState={weekendState} weather={weather} />
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -529,6 +620,9 @@ export default function Live() {
       {activeTab === 'STRATEGY'  && <div className="flex-1 overflow-hidden"><StrategyTab /></div>}
       {activeTab === 'TELEMETRY' && <div className="flex-1 overflow-hidden"><TelemetryTab /></div>}
       {activeTab === 'RADIO'     && <div className="flex-1 overflow-hidden"><RadioTab /></div>}
+
+      {/* Live Broadcast Event Banner Ticker */}
+      <BroadcastBanner />
     </div>
   )
 }

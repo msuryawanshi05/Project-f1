@@ -6,12 +6,16 @@ export const SkeletonLine = memo(function SkeletonLine({ width = 'w-full', heigh
 })
 
 // ── Empty state with icon ─────────────────────────────────────────────────────
-export function EmptyState({ icon, title, message }) {
+export function EmptyState({ icon, title, message, className = "max-w-lg mx-auto my-12" }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center text-pitwall-ghost gap-3">
-      <span className="text-4xl" role="img" aria-hidden="true">{icon}</span>
-      <p className="font-display text-base text-pitwall-dim">{title}</p>
-      {message && <p className="font-mono text-xs max-w-xs leading-relaxed">{message}</p>}
+    <div className={`flex flex-col items-center justify-center p-8 text-center border-2 border-dashed border-pitwall-border bg-pitwall-surface/40 rounded-sm gap-3 backdrop-blur-[1px] ${className}`}>
+      {icon && <span className="text-3xl mb-1 filter drop-shadow-md select-none" role="img" aria-hidden="true">{icon}</span>}
+      <h3 className="font-display text-sm font-bold tracking-widest text-pitwall-text-strong uppercase">{title}</h3>
+      {message && (
+        <p className="font-mono text-xs text-pitwall-dim max-w-xs leading-relaxed">
+          {message}
+        </p>
+      )}
     </div>
   )
 }

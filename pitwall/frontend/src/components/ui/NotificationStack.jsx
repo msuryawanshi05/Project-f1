@@ -32,17 +32,15 @@ const NotificationCard = memo(function NotificationCard({ notification, onDismis
     el.style.width = '0%'
   }, [notification.live])
 
-  // When live card transitions to finished (live → false), resume progress bar
+  // Auto-dismiss this card when not live (or after live finishes)
   useEffect(() => {
     if (notification.live) return
-    const el = progressRef.current
-    if (!el) return
-    // Animate from current width to 0 in remaining time
-    const remaining = Math.max(0, DISMISS_MS - elapsed * 1000)
-    el.style.transition = `width ${remaining}ms linear`
-    el.style.width = '0%'
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notification.live])
+    const timer = setTimeout(() => {
+      onDismiss(notification.id)
+    }, DISMISS_MS)
+    return () => clearTimeout(timer)
+  }, [notification.live, notification.id, onDismiss])
+
 
   // Live elapsed counter for pit stops
   useEffect(() => {
@@ -59,23 +57,29 @@ const NotificationCard = memo(function NotificationCard({ notification, onDismis
     ? `${notification.message?.split('—')[0]}— ${elapsed.toFixed(1)}s`
     : notification.message
 
+  const isCritical = notification.type === 'critical'
+
   return (
     <div
-      className="flex overflow-hidden bg-[#0d0d0d] border border-[#252525] shadow-2xl"
+      role={isCritical ? 'alert' : 'status'}
+      aria-live={isCritical ? 'assertive' : 'polite'}
+      aria-label={`${notification.title}: ${displayMsg}`}
+      className="flex overflow-hidden bg-pitwall-surface border border-pitwall-border shadow-2xl"
       style={{ minWidth: 268, maxWidth: 328, borderRadius: 2 }}
     >
       {/* Left colour bar */}
       <div
         className="w-[3px] flex-shrink-0"
         style={{ backgroundColor: colour }}
+        aria-hidden="true"
       />
 
       <div className="flex-1 px-2.5 py-2.5 pr-8 relative">
         {/* Dismiss button */}
         <button
           onClick={() => onDismiss(notification.id)}
-          className="absolute top-1.5 right-2 text-[#333] hover:text-[#666] font-mono text-xs leading-none transition-colors"
-          aria-label="Dismiss"
+          className="absolute top-1.5 right-2 text-pitwall-ghost hover:text-pitwall-dim font-mono text-xs leading-none transition-colors"
+          aria-label={`Dismiss ${notification.title} notification`}
         >
           ✕
         </button>
@@ -89,12 +93,12 @@ const NotificationCard = memo(function NotificationCard({ notification, onDismis
         </div>
 
         {/* Message / live counter */}
-        <div className="font-mono text-[10px] text-[#777]">
+        <div className="font-mono text-[10px] text-pitwall-dim">
           {displayMsg}
         </div>
 
         {/* Progress bar */}
-        <div className="mt-2 h-px bg-[#1a1a1a] overflow-hidden">
+        <div className="mt-2 h-px bg-pitwall-border overflow-hidden" aria-hidden="true">
           <div
             ref={progressRef}
             className="h-full"

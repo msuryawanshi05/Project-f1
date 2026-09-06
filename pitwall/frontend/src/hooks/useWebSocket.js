@@ -52,6 +52,7 @@ export function useWebSocket() {
     addRaceControl,
     setCurrentSessionKey,
     updateBestLap,
+    updateGapHistory,
   } = useF1Store()
 
   // ── Route a parsed message into the store ─────────────────────────────────
@@ -64,9 +65,20 @@ export function useWebSocket() {
     devMonitor.lastTs   = new Date().toLocaleTimeString()
 
     switch (type) {
-      case 'session':
-        setSession(data)
+      case 'session': {
+        const cur = useF1Store.getState().session
+        const hasActiveLaps = Boolean((cur.lap && cur.lap >= 1) || (data.lap && data.lap >= 1))
+        const incomingPhase = (data.phase === 'PRE' && hasActiveLaps) ? 'LIVE' : (data.phase || cur.phase)
+        setSession({
+          ...cur,
+          ...data,
+          name: data.name || cur.name,
+          lap: data.lap ?? cur.lap,
+          total_laps: data.total_laps ?? cur.total_laps,
+          phase: incomingPhase,
+        })
         break
+      }
       case 'track_status':
         setTrackStatus(data)
         break
@@ -83,6 +95,11 @@ export function useWebSocket() {
             if (secs && !d.deleted_lap) updateBestLap(d.number, secs)
           }
         })
+        
+        // Accumulate gap history (fallback to 1 if lap is null)
+        const sessionState = useF1Store.getState().session
+        const currentLap = sessionState.lap ?? 1
+        updateGapHistory(drivers, currentLap)
         break
       }
       case 'tyres':
@@ -104,9 +121,17 @@ export function useWebSocket() {
           })
         }
         break
-      case 'lap_count':
-        setSession({ ...useF1Store.getState().session, ...data })
+      case 'lap_count': {
+        const curSession = useF1Store.getState().session
+        const isLive = Boolean(data.current && data.current >= 1)
+        setSession({
+          ...curSession,
+          lap: data.current ?? curSession.lap,
+          total_laps: data.total || curSession.total_laps,
+          phase: (curSession.phase === 'PRE' && isLive) ? 'LIVE' : curSession.phase,
+        })
         break
+      }
       default:
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console

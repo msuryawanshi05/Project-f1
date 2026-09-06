@@ -1,12 +1,11 @@
 /**
  * useOpenF1.js — PITWALL
  *
- * OpenF1 provides FREE historical data (2023+) — NO authentication needed.
- * Real-time data requires a paid subscription (not used here).
+ * NOTE: OpenF1 now requires a paid subscription (returns 401 for all requests as of mid-2026).
+ * Live timing data comes from F1 SignalR feed (free, no auth) via our backend.
+ * Historical/static data comes from Jolpica/Ergast (free, no auth).
  *
- * During LIVE sessions: real-time data comes from F1 SignalR via our backend.
- * After sessions end: OpenF1 historical data used for strategy/telemetry analysis.
- *
+ * These hooks are kept for potential future use if OpenF1 free tier returns.
  * All calls route through /api/openf1 backend proxy (avoids CORS issues).
  */
 
@@ -25,19 +24,13 @@ async function openf1Get(path, params = {}) {
   return res.json()
 }
 
-// ── Check if OpenF1 is reachable (no auth needed) ────────────────────────────
+// ── Check if OpenF1 is reachable ─────────────────────────────────────────────
+// OpenF1 now requires a paid subscription (returns 401 for all requests).
+// Live data comes from F1 SignalR. Historical data comes from Jolpica/Ergast.
 export function useOpenF1Status() {
-  const [reachable, setReachable] = useState(false)
-  const [checked, setChecked]     = useState(false)
-
-  useEffect(() => {
-    // Ping OpenF1 with a lightweight query — historical sessions (always free)
-    openf1Get('v1/sessions', { year: 2025, limit: 1 })
-      .then(() => { setReachable(true);  setChecked(true) })
-      .catch(() => { setReachable(false); setChecked(true) })
-  }, [])
-
-  return { reachable, checked }
+  // OpenF1 is not available without a paid subscription — return false immediately
+  // to avoid 401 errors hitting the network on every Live page mount.
+  return { reachable: false, checked: true }
 }
 
 // ── Historical stints (post-session strategy analysis) ────────────────────────

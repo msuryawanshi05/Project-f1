@@ -14,6 +14,8 @@ const defaultSettings = {
   soundEnabled: true,
   syncDelaySeconds: 0,
   darkMode: true,
+  density: 'comfortable',
+  teamAccent: '#E10600',
 }
 
 const useF1Store = create((set, get) => ({
@@ -38,6 +40,7 @@ const useF1Store = create((set, get) => ({
   weather: null,      // single weather object
   raceControl: [],    // last 50 race control messages
   carData: {},        // { [driverNumber]: { speed, rpm, gear, throttle, brake, drs } }
+  carDataHistory: {}, // { [driverNumber]: [{ speed, rpm, gear, throttle, brake, drs, ... }] }
 
   // ── Strategy chart gap history ──────────────────────────────────────────────
   gapHistory: [],     // [{ lap, gap_<number>: seconds, ... }] — last 100 laps
@@ -81,32 +84,78 @@ const useF1Store = create((set, get) => ({
   setWeather: (weather) => set({ weather }),
 
   addRaceControl: (message) =>
-    set((state) => ({
-      raceControl: [message, ...state.raceControl].slice(0, 50),
-    })),
+    set((state) => {
+      const msgKey = `${message.time}_${message.message}`
+      if (state.raceControl.some((m) => `${m.time}_${m.message}` === msgKey)) {
+        return state
+      }
+      return {
+        raceControl: [message, ...state.raceControl].slice(0, 50),
+      }
+    }),
 
   setCarData: (driverNumber, data) =>
-    set((state) => ({
-      carData: { ...state.carData, [driverNumber]: data },
-    })),
+    set((state) => {
+      const hist = state.carDataHistory[driverNumber] ?? []
+      const newHist = [...hist, data].slice(-300)
+      return {
+        carData: { ...state.carData, [driverNumber]: data },
+        carDataHistory: { ...state.carDataHistory, [driverNumber]: newHist },
+      }
+    }),
 
   addNotification: (notification) =>
-    set((state) => ({
-      notifications: [
-        {
-          id: notification.id ?? Date.now(),        // allow caller to supply id for live updates
-          type: notification.type,
-          event: notification.event,
-          title: notification.title,
-          message: notification.message,
-          live: notification.live ?? false,          // true = pit-stop live timer active
-          driverNumber: notification.driverNumber ?? null,
-          timestamp: new Date().toISOString(),
-          dismissed: false,
-        },
-        ...state.notifications.slice(0, 9),
-      ],
-    })),
+    set((state) => {
+      // Deduplicate: retirement notifications can only be added once per driver
+      if (notification.event === 'retirement' && notification.driverNumber) {
+        const hasExisting = state.notifications.some(
+          (n) => n.event === 'retirement' && String(n.driverNumber) === String(notification.driverNumber)
+        )
+        if (hasExisting) return state
+      }
+
+      // Deduplicate: race_start only once
+      if (notification.event === 'race_start') {
+        const hasExisting = state.notifications.some((n) => n.event === 'race_start')
+        if (hasExisting) return state
+      }
+
+      // General dedup: don't add the exact same title & message if present in last 10 seconds
+      const isDuplicate = state.notifications.some(
+        (n) => n.title === notification.title && n.message === notification.message && (Date.now() - new Date(n.timestamp).getTime() < 10000)
+      )
+      if (isDuplicate) return state
+
+      let filtered = state.notifications
+      // If adding a pit stop notification for a driver, remove older pit stop cards for this driver
+      if (notification.event === 'pit_stop' && notification.driverNumber) {
+        filtered = filtered.filter(
+          (n) => !(n.event === 'pit_stop' && String(n.driverNumber) === String(notification.driverNumber))
+        )
+      }
+      // If adding a retirement notification, remove any pit stop notifications for that driver
+      if (notification.event === 'retirement' && notification.driverNumber) {
+        filtered = filtered.filter(
+          (n) => !(n.event === 'pit_stop' && String(n.driverNumber) === String(notification.driverNumber))
+        )
+      }
+      return {
+        notifications: [
+          {
+            id: notification.id ?? Date.now(),
+            type: notification.type,
+            event: notification.event,
+            title: notification.title,
+            message: notification.message,
+            live: notification.live ?? false,
+            driverNumber: notification.driverNumber ?? null,
+            timestamp: new Date().toISOString(),
+            dismissed: false,
+          },
+          ...filtered.slice(0, 9),
+        ],
+      }
+    }),
 
   // Patch an existing notification (e.g. pit-stop exit updating live timer)
   updateNotification: (id, updates) =>
@@ -139,7 +188,6 @@ const useF1Store = create((set, get) => ({
       results: { ...state.results, [round]: data },
     })),
 
-  // ── Phase 5c: Gap history accumulation ─────────────────────────────────────
   updateGapHistory: (timingArr, currentLap) =>
     set((state) => {
       if (!currentLap) return {}
@@ -150,7 +198,15 @@ const useF1Store = create((set, get) => ({
         const parsed = parseGapRaw(d.gap_to_leader ?? d.gap)
         if (parsed !== null) entry[`gap_${num}`] = parsed
       })
-      const next = [...state.gapHistory, entry]
+      const history = state.gapHistory
+      const lastIndex = history.findIndex((h) => h.lap === currentLap)
+      let next
+      if (lastIndex !== -1) {
+        next = [...history]
+        next[lastIndex] = { ...next[lastIndex], ...entry }
+      } else {
+        next = [...history, entry]
+      }
       return { gapHistory: next.slice(-100) }
     }),
 
@@ -166,6 +222,16 @@ const useF1Store = create((set, get) => ({
 
   // ── Phase 6: Session key ────────────────────────────────────────────────────
   setCurrentSessionKey: (key) => set({ currentSessionKey: key }),
+
+  pitStops: [],
+  addPitStop: (stop) =>
+    set((state) => {
+      const exists = state.pitStops.some(
+        (s) => String(s.driver_number) === String(stop.driver_number) && s.stop_number === stop.stop_number
+      )
+      if (exists) return {}
+      return { pitStops: [stop, ...state.pitStops].slice(0, 100) }
+    }),
 
   // ── Phase 6: Best lap accumulation (qualifying mode) ────────────────────────
   updateBestLap: (driverNumber, lapSeconds) =>

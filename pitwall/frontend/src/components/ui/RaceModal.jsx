@@ -6,29 +6,8 @@
 
 import { useEffect } from 'react'
 import TrackMap from './TrackMap'
-
-const FLAGS = {
-  Japan: '🇯🇵', Australia: '🇦🇺', China: '🇨🇳', Bahrain: '🇧🇭',
-  'Saudi Arabia': '🇸🇦', 'United States': '🇺🇸', 'United Arab Emirates': '🇦🇪',
-  Brazil: '🇧🇷', Mexico: '🇲🇽', Italy: '🇮🇹', Spain: '🇪🇸',
-  Monaco: '🇲🇨', Canada: '🇨🇦', Austria: '🇦🇹', UK: '🇬🇧',
-  'United Kingdom': '🇬🇧', Belgium: '🇧🇪', Netherlands: '🇳🇱',
-  Hungary: '🇭🇺', Azerbaijan: '🇦🇿', Singapore: '🇸🇬',
-  Qatar: '🇶🇦', UAE: '🇦🇪', USA: '🇺🇸',
-}
-
-function formatSessionTime(dateStr, timeStr) {
-  if (!dateStr) return null
-  try {
-    const dt = new Date(`${dateStr}T${timeStr ?? '12:00:00Z'}`)
-    return dt.toLocaleString('en-GB', {
-      weekday: 'short', day: '2-digit', month: 'short',
-      hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-    })
-  } catch {
-    return dateStr
-  }
-}
+import useF1Store from '../../store/useF1Store'
+import { getCountryAbbreviation, formatSessionTime } from '../../utils/driverUtils'
 
 function buildSessions(race) {
   const sessions = []
@@ -57,7 +36,10 @@ export default function RaceModal({ race, circuitData, onClose }) {
     return () => { document.body.style.overflow = '' }
   }, [])
 
-  const flag     = FLAGS[race.Circuit?.Location?.country] ?? '🏁'
+  const currentRound = useF1Store((state) => state.currentWeekend?.round)
+  const isCurrent = race?.round && currentRound ? String(race.round) === String(currentRound) : false
+
+  const flag     = getCountryAbbreviation(race.Circuit?.Location?.country)
   const sessions = buildSessions(race)
   const now      = new Date()
 
@@ -80,8 +62,11 @@ export default function RaceModal({ race, circuitData, onClose }) {
             <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase mb-1">
               Round {race.round} · 2026 FIA Formula 1
             </div>
-            <h2 className="font-display font-bold text-2xl text-white tracking-wide uppercase leading-tight">
-              {flag} {race.raceName}
+            <h2 className="font-display font-bold text-2xl text-pitwall-text-strong tracking-wide uppercase leading-tight flex items-center gap-3">
+              <span className="font-mono font-bold text-sm bg-pitwall-surface border border-pitwall-border px-2 py-0.5 rounded-sm text-status-red align-middle">
+                {flag}
+              </span>
+              <span className="align-middle">{race.raceName}</span>
             </h2>
             <div className="font-mono text-xs text-pitwall-dim mt-1">
               {race.Circuit?.circuitName} · {race.Circuit?.Location?.locality}, {race.Circuit?.Location?.country}
@@ -89,7 +74,7 @@ export default function RaceModal({ race, circuitData, onClose }) {
           </div>
           <button
             onClick={onClose}
-            className="flex-shrink-0 w-8 h-8 flex items-center justify-center border border-pitwall-border text-pitwall-ghost hover:text-white hover:border-pitwall-muted transition-colors font-mono text-sm"
+            className="flex-shrink-0 w-8 h-8 flex items-center justify-center border border-pitwall-border text-pitwall-ghost hover:text-pitwall-text-strong hover:border-pitwall-muted transition-colors font-mono text-sm"
             aria-label="Close"
           >
             ✕
@@ -110,7 +95,7 @@ export default function RaceModal({ race, circuitData, onClose }) {
             {sessions.map((s) => {
               const past    = isPastSession(s)
               const isRace  = s.label === 'RACE'
-              const formatted = formatSessionTime(s.date, s.time)
+              const formatted = formatSessionTime(s.date, s.time, isCurrent, true)
               return (
                 <div
                   key={s.label}
@@ -139,13 +124,6 @@ export default function RaceModal({ race, circuitData, onClose }) {
           </div>
         </div>
 
-        {/* Circuit notes (2026 regulation callout — no DRS) */}
-        <div className="mx-6 mb-6 px-3 py-2 bg-[#0d0d0d] border border-pitwall-border">
-          <div className="font-mono text-[9px] text-pitwall-ghost tracking-widest uppercase mb-1">2026 Regulations</div>
-          <div className="font-mono text-[10px] text-pitwall-dim">
-            No DRS in 2026. Active aero (manual override) replaces DRS under FIA 2026 Technical Regulations.
-          </div>
-        </div>
       </div>
     </div>
   )

@@ -1,16 +1,10 @@
 import { useState } from 'react'
+import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
 import circuits from '../data/circuits.json'
 import CircuitDetailPanel from '../components/season/CircuitDetailPanel'
-
-const FLAGS = {
-  Japan: '🇯🇵', Australia: '🇦🇺', China: '🇨🇳', Bahrain: '🇧🇭',
-  'Saudi Arabia': '🇸🇦', 'United States': '🇺🇸', 'United Arab Emirates': '🇦🇪',
-  Brazil: '🇧🇷', Mexico: '🇲🇽', Italy: '🇮🇹', Spain: '🇪🇸',
-  Monaco: '🇲🇨', Canada: '🇨🇦', Austria: '🇦🇹', 'United Kingdom': '🇬🇧',
-  Belgium: '🇧🇪', Netherlands: '🇳🇱', Hungary: '🇭🇺',
-  Azerbaijan: '🇦🇿', Singapore: '🇸🇬', Qatar: '🇶🇦',
-}
+import { getCountryAbbreviation } from '../utils/driverUtils'
+import { MiniPodiumPreview } from '../components/ui/Tooltip'
 
 function matchCircuit(race) {
   const rn = (race.raceName ?? '').toLowerCase().replace(' grand prix', '').trim()
@@ -23,6 +17,7 @@ function matchCircuit(race) {
 export default function Season() {
   const calendar        = useF1Store((s) => s.calendar)
   const calendarLoading = useF1Store((s) => s.calendarLoading)
+  const results         = useF1Store((s) => s.results)
   const [selectedRace, setSelectedRace] = useState(null)
 
   if (calendarLoading) {
@@ -45,7 +40,7 @@ export default function Season() {
     <div className="min-h-full bg-pitwall-bg relative">
       {/* Header */}
       <div className="border-b border-pitwall-border px-6 py-4">
-        <h1 className="font-display font-bold text-3xl tracking-widest text-white uppercase">
+        <h1 className="font-display font-bold text-3xl tracking-widest text-pitwall-text-strong uppercase">
           2026 Season
         </h1>
         <div className="font-mono text-xs text-pitwall-dim mt-1">
@@ -58,74 +53,83 @@ export default function Season() {
         className="divide-y divide-pitwall-border transition-all duration-300"
         style={{ marginRight: selectedRace ? 480 : 0 }}
       >
-        {calendar.map((race) => {
+        {calendar.map((race, i) => {
           const circuitData = matchCircuit(race)
           const country     = race.Circuit?.Location?.country ?? ''
-          const flag        = FLAGS[country] ?? '🏁'
+          const flag        = getCountryAbbreviation(country)
           const isPast      = new Date(race.date) < now
           const isNext      = !isPast && calendar.filter((r) => new Date(r.date) >= now)[0]?.round === race.round
           const isSelected  = selectedRace?.round === race.round
+          const resultsData = results[race.round]
 
           return (
-            <div
+            <motion.div
               key={race.round}
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-10px' }}
+              transition={{ duration: 0.35, delay: Math.min(i * 0.03, 0.4), ease: 'easeOut' }}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => e.key === 'Enter' && selectRace(race)}
               onClick={() => selectRace(race)}
               className={`flex items-center gap-4 px-6 py-3 transition-colors cursor-pointer select-none ${
-                isSelected     ? 'bg-[#141414]' :
-                isPast         ? 'opacity-50 hover:bg-pitwall-surface/30' :
-                isNext         ? 'bg-pitwall-surface hover:bg-pitwall-surface/80' :
+                isSelected     ? 'bg-pitwall-surface-2' :
+                isPast         ? 'opacity-60 hover:bg-pitwall-surface/30' :
+                isNext         ? 'bg-pitwall-surface hover:bg-pitwall-surface-2/80' :
                                  'hover:bg-pitwall-surface/50'
               }`}
-              style={isNext ? { borderLeft: '3px solid #E8002D' } : { borderLeft: `3px solid ${isSelected ? '#E8002D' : 'transparent'}` }}
+              style={isNext ? { borderLeft: '3px solid var(--pw-red)' } : { borderLeft: `3px solid ${isSelected ? 'var(--pw-red)' : 'transparent'}` }}
             >
-              {/* Round */}
-              <div className="w-8 flex-shrink-0 font-mono text-xs text-pitwall-ghost text-right">
-                R{race.round}
+            {/* Round */}
+            <div className="w-8 flex-shrink-0 font-mono text-xs text-pitwall-dim text-right">
+              R{race.round}
+            </div>
+
+            {/* Flag */}
+            <div className="flex-shrink-0 font-mono font-bold text-xs bg-pitwall-surface-2 border border-pitwall-border px-1.5 py-0.5 rounded-sm text-pitwall-text-strong w-10 text-center">
+              {flag}
+            </div>
+
+            {/* Name */}
+            <div className="flex-1 min-w-0">
+              <div className="font-display font-semibold text-sm tracking-wide text-pitwall-text-strong truncate">
+                {race.raceName}
               </div>
-
-              {/* Flag */}
-              <div className="text-xl flex-shrink-0">{flag}</div>
-
-              {/* Name */}
-              <div className="flex-1 min-w-0">
-                <div className="font-display font-semibold text-sm tracking-wide text-pitwall-text truncate">
-                  {race.raceName}
-                </div>
-                <div className="font-mono text-xs text-pitwall-ghost truncate">
-                  {race.Circuit?.circuitName ?? ''} · {country}
-                </div>
+              <div className="font-mono text-xs text-pitwall-dim truncate">
+                {race.Circuit?.circuitName ?? ''} · {country}
               </div>
+            </div>
 
-              {/* Sprint badge */}
-              {circuitData?.sprint && (
-                <div className="flex-shrink-0 font-mono text-[10px] text-status-yellow border border-status-yellow/40 px-1.5 py-0.5 tracking-widest">
-                  SPRINT
-                </div>
-              )}
-
-              {/* Date */}
-              <div className="flex-shrink-0 font-mono text-xs text-pitwall-dim w-24 text-right">
-                {race.date}
+            {/* Sprint badge */}
+            {circuitData?.sprint && (
+              <div className="flex-shrink-0 font-mono text-[10px] text-status-yellow border border-status-yellow/40 px-1.5 py-0.5 tracking-widest">
+                SPRINT
               </div>
+            )}
 
-              {/* Status */}
-              {isPast && (
-                <div className="flex-shrink-0 font-mono text-[10px] text-pitwall-ghost border border-pitwall-muted px-1.5 py-0.5">
+            {/* Date */}
+            <div className="flex-shrink-0 font-mono text-xs text-pitwall-text-strong w-24 text-right">
+              {race.date}
+            </div>
+
+            {/* Status */}
+            {isPast && (
+              <MiniPodiumPreview round={race.round}>
+                <div className="flex-shrink-0 font-mono text-[10px] text-pitwall-dim border border-pitwall-border px-1.5 py-0.5 hover:text-white hover:border-white transition-colors cursor-help">
                   DONE
                 </div>
-              )}
-              {isNext && !isSelected && (
-                <div className="flex-shrink-0 font-mono text-[10px] text-status-red border border-status-red/40 px-1.5 py-0.5">
-                  NEXT
-                </div>
-              )}
-              {isSelected && (
-                <div className="flex-shrink-0 font-mono text-[10px] text-[#E8002D]">›</div>
-              )}
-            </div>
+              </MiniPodiumPreview>
+            )}
+            {isNext && !isSelected && (
+              <div className="flex-shrink-0 font-mono text-[10px] text-status-red border border-status-red/40 px-1.5 py-0.5">
+                NEXT
+              </div>
+            )}
+            {isSelected && (
+              <div className="flex-shrink-0 font-mono text-[10px] text-status-red">›</div>
+            )}
+            </motion.div>
           )
         })}
       </div>
