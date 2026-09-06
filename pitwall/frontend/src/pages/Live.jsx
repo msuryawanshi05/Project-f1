@@ -340,6 +340,74 @@ export default function Live() {
     []
   )
 
+  const penaltiesByDriver = useMemo(() => {
+    const map = {}
+    const seenMessages = new Set()
+
+    for (let i = raceControl.length - 1; i >= 0; i--) {
+      const msg = raceControl[i]
+      const txt = msg.message || ''
+      const upper = txt.toUpperCase()
+
+      // Skip non-penalty steward messages
+      if (upper.includes('NO FURTHER ACTION') || (upper.includes('INVESTIGATION') && !upper.includes('PENALTY'))) {
+        continue
+      }
+      if (upper.includes('TRACK LIMITS') && !upper.includes('PENALTY')) {
+        continue
+      }
+
+      const isTimePen = upper.includes('TIME PENALTY') || upper.includes('SECOND PENALTY') || /\d+\s*SEC(?:OND)?\s*TIME\s*PENALTY/.test(upper)
+      const isDriveThrough = upper.includes('DRIVE THROUGH') || upper.includes('DRIVE-THROUGH')
+      const isStopGo = upper.includes('STOP AND GO') || upper.includes('STOP/GO') || upper.includes('STOP & GO')
+      const isDSQ = upper.includes('DISQUALIFIED')
+      const isGeneralPenalty = upper.includes('PENALTY')
+
+      if (isTimePen || isDriveThrough || isStopGo || isDSQ || isGeneralPenalty) {
+        let drvNum = msg.driver_number != null ? String(msg.driver_number) : null
+        if (!drvNum) {
+          const m = upper.match(/CAR(?:S)?\s+(\d+)/i)
+          if (m) drvNum = m[1]
+        }
+
+        if (drvNum) {
+          const msgKey = `${drvNum}_${txt.trim()}`
+          if (seenMessages.has(msgKey)) continue
+          seenMessages.add(msgKey)
+
+          let label = 'PEN'
+          let duration = null
+
+          const secMatch = upper.match(/(\d+)\s*(?:SECOND|SEC)\b/i)
+          if (secMatch) {
+            duration = parseInt(secMatch[1], 10)
+            const prevDuration = map[drvNum]?.duration ?? 0
+            const totalDuration = prevDuration + duration
+            label = `+${totalDuration}s`
+            map[drvNum] = {
+              label,
+              duration: totalDuration,
+              message: map[drvNum] ? `${map[drvNum].message} | ${txt}` : txt,
+              lap: msg.lap,
+            }
+          } else if (isDriveThrough) {
+            label = 'DT'
+            map[drvNum] = { label, duration: null, message: txt, lap: msg.lap }
+          } else if (isStopGo) {
+            label = 'SG'
+            map[drvNum] = { label, duration: null, message: txt, lap: msg.lap }
+          } else if (isDSQ) {
+            label = 'DSQ'
+            map[drvNum] = { label, duration: null, message: txt, lap: msg.lap }
+          } else if (!map[drvNum]) {
+            map[drvNum] = { label: 'PEN', duration: null, message: txt, lap: msg.lap }
+          }
+        }
+      }
+    }
+    return map
+  }, [raceControl])
+
   const sessionName = session.name ?? ''
   const isQ  = sessionName.toUpperCase().includes('QUALIFYING') || sessionName.includes('Q1')
   const isQ2 = sessionName.includes('Q2') || sessionName.includes('Q3')
@@ -348,8 +416,8 @@ export default function Live() {
 
   const colWidths = {
     pos: 'w-[6%] min-w-[28px]',
-    drv: 'w-[12%] min-w-[58px] pl-1',
-    gap: 'w-[14%] min-w-[64px]',
+    drv: 'w-[13%] min-w-[66px] pl-1',
+    gap: 'w-[13%] min-w-[62px]',
     lastLap: 'w-[14%] min-w-[70px]',
     s1: 'w-[11%] min-w-[52px] text-center',
     s2: 'w-[11%] min-w-[52px] text-center',
@@ -495,6 +563,7 @@ export default function Live() {
                       const tyre       = tyresByDriver[driverNum]
                       const teamColour = getTeamColour(driverNum, drivers)
                       const isFav      = settings.favouriteDrivers?.includes(String(driverNum))
+                      const penalty    = penaltiesByDriver[String(driverNum)]
 
                       const prevT = index > 0 ? sortedTiming[index - 1] : null
                       const currentGapSecs = parseGapToSeconds(t?.gap_to_leader ?? t?.gap)
@@ -518,6 +587,7 @@ export default function Live() {
                             onExpand={() => handleExpand(driverNum)}
                             isBattling={isBattling}
                             showSidebar={showSidebar}
+                            penalty={penalty}
                           />
                           {(showQ1Div || showQ2Div || showQ3Div) && (
                             <div className="flex items-center gap-2 px-4 py-1 bg-pitwall-surface-2">

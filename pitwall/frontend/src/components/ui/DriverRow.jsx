@@ -18,6 +18,7 @@ const DriverRow = memo(function DriverRow({
   onExpand,
   isBattling = false,
   showSidebar = true,
+  penalty = null,
 }) {
   const density = useF1Store((s) => s.settings.density)
   const isCompact = density === 'compact'
@@ -25,8 +26,8 @@ const DriverRow = memo(function DriverRow({
 
   const colWidths = {
     pos: 'w-[6%] min-w-[28px]',
-    drv: 'w-[12%] min-w-[58px] pl-1',
-    gap: 'w-[14%] min-w-[64px]',
+    drv: 'w-[13%] min-w-[66px] pl-1',
+    gap: 'w-[13%] min-w-[62px]',
     lastLap: 'w-[14%] min-w-[70px]',
     s1: 'w-[11%] min-w-[52px] text-center',
     s2: 'w-[11%] min-w-[52px] text-center',
@@ -166,6 +167,14 @@ const DriverRow = memo(function DriverRow({
         </div>
 
         <div className={`${colWidths.drv} flex-shrink-0 flex items-center font-display font-extrabold ${isCompact ? 'text-xs' : 'text-[14px]'} uppercase pl-1 transition-all duration-300`} style={{ color: teamColour }}>
+          {penalty && (
+            <Tooltip content={penalty.message || `Penalty: ${penalty.label}`}>
+              <span className="inline-flex items-center justify-center font-mono font-black text-[9px] px-1 py-0.5 rounded leading-none flex-shrink-0 bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm animate-pulse mr-1">
+                <span className="mr-0.5 text-[8px]">⚠️</span>
+                {penalty.label}
+              </span>
+            </Tooltip>
+          )}
           <Tooltip content={resolved?.name || `${driver?.givenName ?? ''} ${driver?.familyName ?? ''}`.trim() || `Driver #${driverNum}`}>
             <span className={`tracking-wider ${isOutOfRace ? 'line-through text-pitwall-dim' : ''}`}>{code}</span>
           </Tooltip>
@@ -315,6 +324,7 @@ const DriverRow = memo(function DriverRow({
   prev.tyre?.age                  === next.tyre?.age                  &&
   prev.tyre?.stint_number         === next.tyre?.stint_number         &&
   prev.tyre?.stints?.length       === next.tyre?.stints?.length       &&
+  prev.penalty?.label             === next.penalty?.label             &&
   prev.teamColour                 === next.teamColour                 &&
   prev.isFavourite                === next.isFavourite                &&
   prev.isBattling                 === next.isBattling                 &&
