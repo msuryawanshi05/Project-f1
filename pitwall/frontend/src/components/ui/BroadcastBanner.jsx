@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import useF1Store from '../../store/useF1Store'
-import { getSafeTeamColour } from '../../utils/driverUtils'
+import { getSafeTeamColour, resolveDriverCode } from '../../utils/driverUtils'
 
 const TEAM_COLOURS = {
   'Red Bull': '#3671C6', 'Ferrari': '#E8002D', 'Mercedes': '#27F4D2',
@@ -31,6 +31,7 @@ export default function BroadcastBanner() {
   const prevRetired = useRef(new Set())
   const lastTrackStatus = useRef(null)
   const prevRCLength = useRef(0)
+  const isBannerInitialized = useRef(false)
 
   // Queue of events to display
   const eventQueue = useRef([])
@@ -40,7 +41,7 @@ export default function BroadcastBanner() {
   const getDriverDetails = (driverNum) => {
     const d = drivers.find((drv) => String(drv.number) === String(driverNum))
     return {
-      code: d?.short_name ?? d?.code ?? `#${driverNum}`,
+      code: resolveDriverCode(driverNum, drivers),
       name: d?.familyName ?? '',
       team: d?.team_name ?? d?.constructor_name ?? '',
       teamColour: getTeamColourByName(d?.team_name ?? d?.constructor_name ?? '')
@@ -76,7 +77,30 @@ export default function BroadcastBanner() {
 
   // 1. Detect Lead Change, Fastest Lap, and Retirements
   useEffect(() => {
-    if (!timing || timing.length === 0 || drivers.length === 0) return
+    if (!timing || timing.length === 0) return
+
+    // Cold start snapshot: seed existing state so past events do not trigger banners
+    if (!isBannerInitialized.current) {
+      timing.forEach((t) => {
+        const num = String(t.driver_number ?? t.number)
+        const isStopped = t.stopped || t.status?.toUpperCase() === 'OUT' || t.status?.toUpperCase() === 'DNF' || t.status?.toUpperCase() === 'RETIRED'
+        if (isStopped) {
+          prevRetired.current.add(num)
+        }
+      })
+      const currentFastestRow = timing.find((t) => t.overall_fastest)
+      if (currentFastestRow) {
+        const currentFastestNum = currentFastestRow.driver_number ?? currentFastestRow.number
+        const lapTime = currentFastestRow.last_lap_time_in_s ?? currentFastestRow.last_lap
+        prevFastest.current = `${currentFastestNum}-${lapTime}`
+      }
+      const currentP1Row = timing.find((t) => String(t.position) === '1')
+      if (currentP1Row) {
+        prevP1.current = currentP1Row.driver_number ?? currentP1Row.number
+      }
+      isBannerInitialized.current = true
+      return
+    }
 
     // 1.1 Detect Lead Change
     const currentP1Row = timing.find((t) => String(t.position) === '1')
@@ -115,7 +139,7 @@ export default function BroadcastBanner() {
       prevFastest.current = currentFastestKey
     }
 
-    // 1.3 Detect Retirements
+    // 1.3 Detect Retirements (live transitions only)
     timing.forEach((t) => {
       const num = String(t.driver_number ?? t.number)
       const isStopped = t.stopped || t.status?.toUpperCase() === 'OUT' || t.status?.toUpperCase() === 'DNF' || t.status?.toUpperCase() === 'RETIRED'

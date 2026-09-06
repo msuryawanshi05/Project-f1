@@ -58,6 +58,26 @@ const DriverRow = memo(function DriverRow({
   const isRetired = timing?.stopped === true
   const isOutOfRace = isRetired || timing?.knockout === true
 
+  // Derive completed pit stop count from timing or tyre stints (stint 1 = 0 stops, stint 2 = 1 stop, etc.)
+  const pitCount = useMemo(() => {
+    if (timing?.pit_count != null && !isNaN(Number(timing.pit_count))) {
+      return Number(timing.pit_count)
+    }
+    if (timing?.number_of_pit_stops != null && !isNaN(Number(timing.number_of_pit_stops))) {
+      return Number(timing.number_of_pit_stops)
+    }
+    if (timing?.pits != null && !isNaN(Number(timing.pits))) {
+      return Number(timing.pits)
+    }
+    if (tyre?.stint_number != null && tyre.stint_number > 0) {
+      return Math.max(0, tyre.stint_number - 1)
+    }
+    if (Array.isArray(tyre?.stints) && tyre.stints.length > 0) {
+      return Math.max(0, tyre.stints.length - 1)
+    }
+    return 0
+  }, [timing?.pit_count, timing?.number_of_pit_stops, timing?.pits, tyre?.stint_number, tyre?.stints])
+
   const s1Col = timing?.s1_colour ?? timing?.best_sector_1_colour ?? null
   const s2Col = timing?.s2_colour ?? timing?.best_sector_2_colour ?? null
   const s3Col = timing?.s3_colour ?? timing?.best_sector_3_colour ?? null
@@ -72,7 +92,7 @@ const DriverRow = memo(function DriverRow({
   const positionFlash = useFlashOnChange(pos)
   const gapFlash = useFlashOnChange(timing?.gap_to_leader ?? timing?.gap)
   const lapFlash = useFlashOnChange(lastLap)
-  const pitCountFlash = useFlashOnChange(timing?.pit_count)
+  const pitCountFlash = useFlashOnChange(pitCount)
 
   const prevPos = useRef(pos)
   const [direction, setDirection] = useState(null)
@@ -208,7 +228,13 @@ const DriverRow = memo(function DriverRow({
         </div>
 
         <div className={`${colWidths.pit} flex-shrink-0 text-center font-mono ${isCompact ? 'text-[11px]' : 'text-xs'} text-pitwall-dim font-bold transition-all duration-300`}>
-          {timing?.pit_count ?? '0'}
+          <motion.span
+            animate={pitCountFlash ? { backgroundColor: ['rgba(232,0,45,0.3)', 'rgba(232,0,45,0)'] } : {}}
+            transition={{ duration: 0.6 }}
+            className={`px-1 rounded ${pitCount > 0 ? 'text-pitwall-text-strong font-bold' : 'text-pitwall-ghost'}`}
+          >
+            {pitCount}
+          </motion.span>
         </div>
 
         <div 
@@ -255,7 +281,7 @@ const DriverRow = memo(function DriverRow({
                   transition={{ duration: 0.6 }}
                   className="font-bold text-pitwall-text-strong timing-number px-1 rounded"
                 >
-                  {timing?.pit_count ?? '0'}
+                  {pitCount}
                 </motion.span>
               </div>
               {tyre && (
@@ -287,6 +313,8 @@ const DriverRow = memo(function DriverRow({
   prev.timing?.deleted_lap        === next.timing?.deleted_lap        &&
   prev.tyre?.compound             === next.tyre?.compound             &&
   prev.tyre?.age                  === next.tyre?.age                  &&
+  prev.tyre?.stint_number         === next.tyre?.stint_number         &&
+  prev.tyre?.stints?.length       === next.tyre?.stints?.length       &&
   prev.teamColour                 === next.teamColour                 &&
   prev.isFavourite                === next.isFavourite                &&
   prev.isBattling                 === next.isBattling                 &&

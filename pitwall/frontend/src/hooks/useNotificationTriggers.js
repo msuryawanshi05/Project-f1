@@ -38,8 +38,7 @@ export default function useNotificationTriggers() {
   const pitTimers       = useRef({})
   // Previous in_pit state per driver
   const prevInPit       = useRef({})
-  const isPitInitialized = useRef(false)
-  const isRetirementInitialized = useRef(false)
+  const isLiveReady     = useRef(false)
   // Race lifecycle refs (Bug 8)
   const prevPhaseRef       = useRef(session.phase)
   const prevTrackStatusRef = useRef(trackStatus?.status)
@@ -47,7 +46,16 @@ export default function useNotificationTriggers() {
   const lastDrsMsg      = useRef(null)
   const hasFiredRaceStart = useRef(false)
   const seenRCMsgKeys   = useRef(new Set())
-  const isRCInitialized = useRef(false)
+
+  // On initial mount: clear any stale past notifications from previous sessions
+  useEffect(() => {
+    useF1Store.getState().resetNotificationHistory()
+    // Grace period for WebSocket to stream and hydrate all initial historical snapshots
+    const timer = setTimeout(() => {
+      isLiveReady.current = true
+    }, 2500)
+    return () => clearTimeout(timer)
+  }, [])
 
   // DEV-only: expose store for browser console debugging
   useEffect(() => {
@@ -56,14 +64,15 @@ export default function useNotificationTriggers() {
     }
   }, [])
 
-  // ── 1. Track status ───────────────────────────────────────────────────────
+  // ── 1. Track status (live transitions only) ────────────────────────────────
   useEffect(() => {
     const status = trackStatus?.status
     if (!status || status === lastTrackStatus.current) return
     const prev = lastTrackStatus.current
     lastTrackStatus.current = status
 
-    if (prev === null) return  // don't fire on cold start
+    // Do not fire on cold start or during initial store hydration
+    if (prev === null || !isLiveReady.current) return
 
     const curLap = session.lap ?? '?'
     if (status === '4') {
@@ -120,12 +129,12 @@ export default function useNotificationTriggers() {
 
     // If connected mid-race (lap >= 1 or any completed lap in timing), mark race start as already happened
     const hasLaps = (curLap && curLap >= 1) || timing.some((d) => d.number_of_laps > 0)
-    if (hasLaps || (curPhase === 'LIVE' && prevPhase === null)) {
+    if (hasLaps || (curPhase === 'LIVE' && prevPhase === null) || !isLiveReady.current) {
       hasFiredRaceStart.current = true
     }
 
-    // 1. RACE STARTED — session phase transitions to LIVE for the first time
-    if (curPhase === 'LIVE' && !hasFiredRaceStart.current && !hasLaps) {
+    // 1. RACE STARTED — only if session genuinely starts live in front of the user
+    if (isLiveReady.current && curPhase === 'LIVE' && !hasFiredRaceStart.current && !hasLaps) {
       if (prevPhase !== null && prevPhase !== 'LIVE') {
         if (addNotification({
           id: Date.now(),
@@ -143,7 +152,7 @@ export default function useNotificationTriggers() {
     }
 
     // 2. RACE RESTART IMMINENT — Red Flag (5) → Safety Car (4)
-    if (curStatus === '4' && prevStatus === '5') {
+    if (isLiveReady.current && curStatus === '4' && prevStatus === '5') {
       if (addNotification({
         id: Date.now(),
         type: 'critical',
@@ -158,7 +167,7 @@ export default function useNotificationTriggers() {
     }
 
     // 3. RACE RESUMED — Safety Car/VSC (4/6) → Green (1)
-    if (curStatus === '1' && (prevStatus === '4' || prevStatus === '5' || prevStatus === '6')) {
+    if (isLiveReady.current && curStatus === '1' && (prevStatus === '4' || prevStatus === '5' || prevStatus === '6')) {
       if (addNotification({
         id: Date.now(),
         type: 'critical',
@@ -179,12 +188,11 @@ export default function useNotificationTriggers() {
 
   // ── 2. Race control messages (DRS, penalties, restarts) ───────────────────
   useEffect(() => {
-    // Initial snapshot: mark all existing messages as seen so we don't spam popups for past events
-    if (!isRCInitialized.current) {
+    // During hydration: silently mark all existing historical messages as seen
+    if (!isLiveReady.current) {
       raceControl.forEach((msg) => {
         seenRCMsgKeys.current.add(`${msg.time}_${msg.message}`)
       })
-      isRCInitialized.current = true
       return
     }
 
@@ -305,12 +313,11 @@ export default function useNotificationTriggers() {
 
     if (!timing.length) return
 
-    // Initialize snapshot on first run so drivers already in pit don't false-trigger
-    if (!isPitInitialized.current) {
+    // During hydration: silently capture existing pit states
+    if (!isLiveReady.current) {
       timing.forEach((d) => {
         prevInPit.current[String(d.number)] = d.in_pit
       })
-      isPitInitialized.current = true
       return
     }
 
@@ -399,15 +406,14 @@ export default function useNotificationTriggers() {
   useEffect(() => {
     if (!timing.length) return
 
-    // Seed initially retired drivers on cold start so past retirements don't fire popups
-    if (!isRetirementInitialized.current) {
+    // During hydration: silently record existing retirements so past crashes don't fire popups
+    if (!isLiveReady.current) {
       timing.forEach((d) => {
         const isNowRetired = d.stopped === true || d.status === 'Retired' || d.status === 'Out'
         if (isNowRetired) {
           retiredDrivers.current.add(String(d.number))
         }
       })
-      isRetirementInitialized.current = true
       return
     }
 
@@ -446,8 +452,6 @@ export default function useNotificationTriggers() {
       prevInPit.current = {}
       lastDrsMsg.current = null
       hasFiredRaceStart.current = false
-      isPitInitialized.current = false
-      isRetirementInitialized.current = false
     }
     if (session.name) {
       prevSessionName.current = session.name
@@ -460,6 +464,10 @@ export default function useNotificationTriggers() {
     const fastest = timing.find((d) => d.overall_fastest)
     if (!fastest) return
     const key = `${fastest.number}-${fastest.last_lap}`
+    if (!isLiveReady.current) {
+      prevFastestKey.current = key
+      return
+    }
     if (key === prevFastestKey.current) return
     prevFastestKey.current = key
     if (addNotification({
@@ -477,7 +485,10 @@ export default function useNotificationTriggers() {
   // ── 6. Rain ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (weather === null) return
-    if (prevRainfall.current === null) { prevRainfall.current = weather.rainfall; return }
+    if (!isLiveReady.current || prevRainfall.current === null) {
+      prevRainfall.current = weather.rainfall
+      return
+    }
     if (!prevRainfall.current && weather.rainfall) {
       if (addNotification({
         type: 'teal',
@@ -494,7 +505,10 @@ export default function useNotificationTriggers() {
 
   // ── 7. Chequered flag ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (prevPhase.current === null) { prevPhase.current = session.phase; return }
+    if (!isLiveReady.current || prevPhase.current === null) {
+      prevPhase.current = session.phase
+      return
+    }
     if (prevPhase.current !== 'FINISHED' && session.phase === 'FINISHED') {
       if (addNotification({
         type: 'critical',
