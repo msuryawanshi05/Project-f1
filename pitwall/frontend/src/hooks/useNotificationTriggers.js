@@ -38,6 +38,8 @@ export default function useNotificationTriggers() {
   const pitTimers       = useRef({})
   // Previous in_pit state per driver
   const prevInPit       = useRef({})
+  const isPitInitialized = useRef(false)
+  const isRetirementInitialized = useRef(false)
   // Race lifecycle refs (Bug 8)
   const prevPhaseRef       = useRef(session.phase)
   const prevTrackStatusRef = useRef(trackStatus?.status)
@@ -63,20 +65,47 @@ export default function useNotificationTriggers() {
 
     if (prev === null) return  // don't fire on cold start
 
+    const curLap = session.lap ?? '?'
     if (status === '4') {
-      addNotification({ type: 'critical', event: 'safety_car', title: 'SAFETY CAR', message: `Deployed — Lap ${session.lap ?? '?'}` })
-      sounds.critical()
+      if (addNotification({
+        type: 'critical',
+        event: 'safety_car',
+        title: 'SAFETY CAR',
+        message: `Deployed — Lap ${curLap}`,
+        dedupKey: `sc_${curLap}`
+      })) {
+        sounds.critical()
+      }
     } else if (status === '5') {
-      addNotification({ type: 'critical', event: 'red_flag', title: 'RED FLAG', message: `Session stopped — Lap ${session.lap ?? '?'}` })
-      sounds.critical()
+      if (addNotification({
+        type: 'critical',
+        event: 'red_flag',
+        title: 'RED FLAG',
+        message: `Session stopped — Lap ${curLap}`,
+        dedupKey: `red_${curLap}`
+      })) {
+        sounds.critical()
+      }
     } else if (status === '6') {
-      addNotification({ type: 'high', event: 'vsc', title: 'VIRTUAL SAFETY CAR', message: `Deployed — Lap ${session.lap ?? '?'}` })
-      sounds.high()
+      if (addNotification({
+        type: 'high',
+        event: 'vsc',
+        title: 'VIRTUAL SAFETY CAR',
+        message: `Deployed — Lap ${curLap}`,
+        dedupKey: `vsc_${curLap}`
+      })) {
+        sounds.high()
+      }
     } else if (status === '1' && ['4', '5', '6'].includes(prev)) {
-      // Reset guard so SC can fire again later in race if redeployed
-      addNotification({ type: 'teal', event: 'green_flag', title: 'GREEN FLAG', message: 'Track clear — racing resumed' })
-      sounds.teal()
-      // Allow future SC notifications
+      if (addNotification({
+        type: 'teal',
+        event: 'green_flag',
+        title: 'GREEN FLAG',
+        message: 'Track clear — racing resumed',
+        dedupKey: `green_${curLap}`
+      })) {
+        sounds.teal()
+      }
       lastTrackStatus.current = '1'
     }
   }, [trackStatus, session.lap, addNotification])
@@ -87,63 +116,70 @@ export default function useNotificationTriggers() {
     const prevStatus = prevTrackStatusRef.current
     const curStatus  = trackStatus?.status
     const curPhase   = session.phase
+    const curLap     = session.lap
 
-    // If connected mid-race (lap > 1), don't falsely announce race start
-    if ((session.lap && session.lap > 1) || (curPhase === 'LIVE' && prevPhase === null)) {
+    // If connected mid-race (lap >= 1 or any completed lap in timing), mark race start as already happened
+    const hasLaps = (curLap && curLap >= 1) || timing.some((d) => d.number_of_laps > 0)
+    if (hasLaps || (curPhase === 'LIVE' && prevPhase === null)) {
       hasFiredRaceStart.current = true
     }
 
     // 1. RACE STARTED — session phase transitions to LIVE for the first time
-    if (curPhase === 'LIVE' && !hasFiredRaceStart.current) {
+    if (curPhase === 'LIVE' && !hasFiredRaceStart.current && !hasLaps) {
       if (prevPhase !== null && prevPhase !== 'LIVE') {
-        addNotification({
+        if (addNotification({
           id: Date.now(),
           type: 'critical',
           event: 'race_start',
           title: '🚦 RACE STARTED',
           message: 'Lights out and away we go!',
           live: false,
-        })
-        sounds.critical()
+          dedupKey: 'race_start'
+        })) {
+          sounds.critical()
+        }
       }
       hasFiredRaceStart.current = true
     }
 
     // 2. RACE RESTART IMMINENT — Red Flag (5) → Safety Car (4)
-    //    This means: race is about to restart behind the safety car
     if (curStatus === '4' && prevStatus === '5') {
-      addNotification({
+      if (addNotification({
         id: Date.now(),
         type: 'critical',
         event: 'race_restart',
         title: '🟡 RACE RESTART',
         message: 'Safety Car deployed — race restarting behind SC',
         live: false,
-      })
-      sounds.critical()
+        dedupKey: `restart_sc_${curLap ?? ''}`
+      })) {
+        sounds.critical()
+      }
     }
 
     // 3. RACE RESUMED — Safety Car/VSC (4/6) → Green (1)
-    //    Or Red Flag directly cleared → Green
     if (curStatus === '1' && (prevStatus === '4' || prevStatus === '5' || prevStatus === '6')) {
-      addNotification({
+      if (addNotification({
         id: Date.now(),
         type: 'critical',
         event: 'race_resumed',
         title: '🟢 RACE RESUMED',
         message: 'Green flag — racing is underway',
         live: false,
-      })
-      sounds.critical()
+        dedupKey: `resumed_green_${curLap ?? ''}`
+      })) {
+        sounds.critical()
+      }
     }
 
     // Update refs
     prevPhaseRef.current  = curPhase
     prevTrackStatusRef.current = curStatus
-  }, [session.phase, trackStatus?.status, session.lap, addNotification])
+  }, [session.phase, trackStatus?.status, session.lap, timing, addNotification])
 
-  // ── 2. Race control messages (DRS, penalties) ─────────────────────────────
+  // ── 2. Race control messages (DRS, penalties, restarts) ───────────────────
   useEffect(() => {
+    // Initial snapshot: mark all existing messages as seen so we don't spam popups for past events
     if (!isRCInitialized.current) {
       raceControl.forEach((msg) => {
         seenRCMsgKeys.current.add(`${msg.time}_${msg.message}`)
@@ -161,51 +197,87 @@ export default function useNotificationTriggers() {
       const txt = msg.message ?? ''
       const upperTxt = txt.toUpperCase()
 
-      // EXCLUDE routine mini-sector yellow / clear flags from popup notifications!
-      if (upperTxt.includes('TRACK SECTOR') || upperTxt.includes('SECTOR ') || upperTxt.includes('CLEAR')) {
+      // 1. EXCLUDE routine mini-sector yellow / clear flags, blue flags, deleted lap times
+      if (
+        msg.flag === 'BLUE' ||
+        upperTxt.includes('BLUE FLAG') ||
+        upperTxt.includes('TRACK SECTOR') ||
+        upperTxt.includes('SECTOR ') ||
+        upperTxt.includes('CLEAR') ||
+        upperTxt.includes('DELETED')
+      ) {
         return
       }
 
-      // DRS — deduplicate by message text
+      // 2. Real driver penalties (e.g. "5 SECOND TIME PENALTY", "DRIVE THROUGH", "STOP AND GO")
+      const isPenalty = upperTxt.includes('PENALTY') || 
+                        upperTxt.includes('DRIVE THROUGH') || 
+                        upperTxt.includes('STOP AND GO') || 
+                        upperTxt.includes('STOP/GO') || 
+                        upperTxt.includes('DISQUALIFIED') ||
+                        upperTxt.includes('BLACK AND WHITE FLAG')
+      if (isPenalty) {
+        const drvNum = msg.driver_number || (upperTxt.match(/CAR\s+(\d+)/i) ? upperTxt.match(/CAR\s+(\d+)/i)[1] : null)
+        const title = upperTxt.includes('TIME PENALTY') ? 'TIME PENALTY' : 'PENALTY'
+        if (addNotification({
+          type: 'high',
+          event: 'penalty',
+          title,
+          message: txt,
+          driverNumber: drvNum,
+          dedupKey: `penalty_${msgKey}`
+        })) {
+          sounds.high()
+        }
+        return
+      }
+
+      // 3. DRS — deduplicate by message text
       if (cat === 'drs' && txt !== lastDrsMsg.current) {
         lastDrsMsg.current = txt
         const on = txt.toLowerCase().includes('enabled')
-        addNotification({ type: 'blue', event: 'drs', title: on ? 'DRS ENABLED' : 'DRS DISABLED', message: txt || (on ? 'DRS zones active' : 'DRS zones closed') })
-        sounds.blue()
+        if (addNotification({
+          type: 'blue',
+          event: 'drs',
+          title: on ? 'DRS ENABLED' : 'DRS DISABLED',
+          message: txt || (on ? 'DRS zones active' : 'DRS zones closed'),
+          dedupKey: `drs_${txt}`
+        })) {
+          sounds.blue()
+        }
         return
       }
 
-      // Race Resumption / Restart time announcements (e.g. "RACE WILL RESUME AT 15:35")
+      // 4. Race Resumption / Restart time announcements (e.g. "RACE WILL RESUME AT 15:35")
       if (upperTxt.includes('RESUME') || upperTxt.includes('RESTART')) {
-        addNotification({
+        if (addNotification({
           id: Date.now() + Math.random(),
           type: 'critical',
           event: 'race_resume_time',
           title: '⏱ RACE RESUMPTION',
           message: txt,
           live: false,
-        })
-        sounds.critical()
+          dedupKey: `resume_${msgKey}`
+        })) {
+          sounds.critical()
+        }
         return
       }
 
+      // 5. Safety Car ending
       if (upperTxt.includes('SAFETY CAR IN THIS LAP') || upperTxt.includes('SC IN THIS LAP')) {
-        addNotification({
+        if (addNotification({
           id: Date.now() + Math.random(),
           type: 'high',
           event: 'sc_ending',
           title: '🟡 SAFETY CAR ENDING',
           message: txt,
           live: false,
-        })
-        sounds.high()
+          dedupKey: `sc_ending_${msgKey}`
+        })) {
+          sounds.high()
+        }
         return
-      }
-
-      // Driver penalty
-      if (cat === 'flag' && msg.scope === 'Driver' && msg.driver_number) {
-        addNotification({ type: 'high', event: 'penalty', title: 'PENALTY', message: `#${msg.driver_number} — ${txt}`, driverNumber: msg.driver_number })
-        sounds.high()
       }
     })
   }, [raceControl, addNotification])
@@ -216,16 +288,13 @@ export default function useNotificationTriggers() {
     if (!session.lap || session.lap < 1) return
 
     // GUARD 2: During SC / VSC / Red Flag every driver is in the pits — not a real stop
-    // status '4'=SC, '5'=Red Flag, '6'=VSC, '7'=VSC ending
     const isSCOrRedPeriod = ['4', '5', '6', '7'].includes(trackStatus?.status)
     if (isSCOrRedPeriod) {
-      // Clear any timers that started before we knew about the SC
       Object.keys(pitTimers.current).forEach((num) => {
         const notifId = pitTimers.current[num]?.notifId
         if (notifId) dismissNotification(notifId)
         delete pitTimers.current[num]
       })
-      // Reset prev state so we don't get false re-trigger when SC ends
       timing.forEach((d) => { prevInPit.current[String(d.number)] = d.in_pit })
       return
     }
@@ -235,6 +304,15 @@ export default function useNotificationTriggers() {
     if (!isLive) return
 
     if (!timing.length) return
+
+    // Initialize snapshot on first run so drivers already in pit don't false-trigger
+    if (!isPitInitialized.current) {
+      timing.forEach((d) => {
+        prevInPit.current[String(d.number)] = d.in_pit
+      })
+      isPitInitialized.current = true
+      return
+    }
 
     const isRace = String(session.name).toUpperCase().includes('RACE') || String(session.phase).toUpperCase() === 'RACE'
 
@@ -253,10 +331,9 @@ export default function useNotificationTriggers() {
         return
       }
 
-      // Entered pit lane
-      if (d.in_pit && !wasInPit && !pitTimers.current[key]) {
+      // Entered pit lane (strict transition from false -> true)
+      if (d.in_pit && wasInPit === false && !pitTimers.current[key]) {
         const notifId = Date.now() + key   // unique per driver
-        // Snapshot the compound BEFORE the stop (will be the old_compound on exit)
         const currentTyreState = tyres.find((t) => String(t.number) === String(key))
         pitTimers.current[key] = {
           startMs: Date.now(),
@@ -264,31 +341,23 @@ export default function useNotificationTriggers() {
           oldCompound: currentTyreState?.compound ?? 'UNKNOWN',
         }
         
-        if (isRace) {
-          // Race: Live counter remains on screen until they exit
-          addNotification({
-            id: notifId,
-            type: 'high', event: 'pit_stop',
-            title: 'PIT STOP',
-            message: `#${key} — in pit lane`,
-            driverNumber: key,
-            live: true,
-          })
-        } else {
-          // Practice/Quali: Non-live notification that auto-dismisses after 5s
-          addNotification({
-            id: notifId,
-            type: 'high', event: 'pit_stop',
-            title: 'PIT STOP',
-            message: `#${key} — in pit lane`,
-            driverNumber: key,
-            live: false,
-          })
+        const added = addNotification({
+          id: notifId,
+          type: 'high',
+          event: 'pit_stop',
+          title: 'PIT STOP',
+          message: `#${key} — in pit lane`,
+          driverNumber: key,
+          lap: session.lap ?? 0,
+          live: isRace,
+          dedupKey: `pit_${key}_lap_${session.lap ?? 0}`
+        })
+        if (!isRace) {
           setTimeout(() => {
             dismissNotification(notifId)
           }, 5000)
         }
-        sounds.high()
+        if (added) sounds.high()
       }
 
       // Exited pit lane (pit_out flag)
@@ -301,14 +370,12 @@ export default function useNotificationTriggers() {
             live: false,
           })
           
-          // Auto-dismiss completed race stops after 10 seconds to keep stack clean
           const targetId = pitTimers.current[key].notifId
           setTimeout(() => {
             dismissNotification(targetId)
           }, 10000)
         }
         
-        // Save completed pit stop into the store
         const currentLap = session.lap ?? 0
         const tyreState = tyres.find((t) => String(t.number) === String(key))
         const stopNum = Math.max(1, (tyreState?.stint_number ?? 2) - 1)
@@ -331,27 +398,41 @@ export default function useNotificationTriggers() {
   // ── 4. Driver retirement (fires once per driver per session) ──────────────
   useEffect(() => {
     if (!timing.length) return
+
+    // Seed initially retired drivers on cold start so past retirements don't fire popups
+    if (!isRetirementInitialized.current) {
+      timing.forEach((d) => {
+        const isNowRetired = d.stopped === true || d.status === 'Retired' || d.status === 'Out'
+        if (isNowRetired) {
+          retiredDrivers.current.add(String(d.number))
+        }
+      })
+      isRetirementInitialized.current = true
+      return
+    }
+
     timing.forEach((d) => {
       const isNowRetired = d.stopped === true || d.status === 'Retired' || d.status === 'Out'
       const driverKey = String(d.number)
       if (isNowRetired && !retiredDrivers.current.has(driverKey)) {
         retiredDrivers.current.add(driverKey)
-        // Clean up any active pit timer for this driver immediately
         if (pitTimers.current[driverKey]) {
           dismissNotification(pitTimers.current[driverKey].notifId)
           delete pitTimers.current[driverKey]
         }
         const resolved = resolveDriver(driverKey)
         const driverLabel = resolved?.code ? `#${driverKey} (${resolved.code})` : `#${driverKey}`
-        addNotification({
+        if (addNotification({
           id: Date.now() + Number(driverKey),
           type: 'critical',
           event: 'retirement',
           title: 'RETIREMENT',
           message: `${driverLabel} has retired`,
           driverNumber: driverKey,
-        })
-        sounds.critical()
+          dedupKey: `retirement_${driverKey}`
+        })) {
+          sounds.critical()
+        }
       }
     })
   }, [timing, addNotification, dismissNotification])
@@ -365,6 +446,8 @@ export default function useNotificationTriggers() {
       prevInPit.current = {}
       lastDrsMsg.current = null
       hasFiredRaceStart.current = false
+      isPitInitialized.current = false
+      isRetirementInitialized.current = false
     }
     if (session.name) {
       prevSessionName.current = session.name
@@ -379,8 +462,16 @@ export default function useNotificationTriggers() {
     const key = `${fastest.number}-${fastest.last_lap}`
     if (key === prevFastestKey.current) return
     prevFastestKey.current = key
-    addNotification({ type: 'medium', event: 'fastest_lap', title: 'FASTEST LAP', message: `#${fastest.number} — ${fastest.last_lap ?? '?'}`, driverNumber: fastest.number })
-    sounds.medium()
+    if (addNotification({
+      type: 'medium',
+      event: 'fastest_lap',
+      title: 'FASTEST LAP',
+      message: `#${fastest.number} — ${fastest.last_lap ?? '?'}`,
+      driverNumber: fastest.number,
+      dedupKey: `fastest_${key}`
+    })) {
+      sounds.medium()
+    }
   }, [timing, addNotification])
 
   // ── 6. Rain ───────────────────────────────────────────────────────────────
@@ -388,8 +479,15 @@ export default function useNotificationTriggers() {
     if (weather === null) return
     if (prevRainfall.current === null) { prevRainfall.current = weather.rainfall; return }
     if (!prevRainfall.current && weather.rainfall) {
-      addNotification({ type: 'teal', event: 'rain', title: 'RAIN DETECTED', message: `Track temp ${weather.track_temp ?? '?'}°C` })
-      sounds.teal()
+      if (addNotification({
+        type: 'teal',
+        event: 'rain',
+        title: 'RAIN DETECTED',
+        message: `Track temp ${weather.track_temp ?? '?'}°C`,
+        dedupKey: 'rain'
+      })) {
+        sounds.teal()
+      }
     }
     prevRainfall.current = weather.rainfall
   }, [weather, addNotification])
@@ -398,8 +496,15 @@ export default function useNotificationTriggers() {
   useEffect(() => {
     if (prevPhase.current === null) { prevPhase.current = session.phase; return }
     if (prevPhase.current !== 'FINISHED' && session.phase === 'FINISHED') {
-      addNotification({ type: 'critical', event: 'chequered', title: 'CHEQUERED FLAG', message: 'Session complete' })
-      sounds.chequered()
+      if (addNotification({
+        type: 'critical',
+        event: 'chequered',
+        title: 'CHEQUERED FLAG',
+        message: 'Session complete',
+        dedupKey: 'chequered'
+      })) {
+        sounds.chequered()
+      }
     }
     prevPhase.current = session.phase
   }, [session.phase, addNotification])

@@ -18,6 +18,9 @@ const defaultSettings = {
   teamAccent: '#E10600',
 }
 
+// Global set of all notification dedup keys seen during the current session
+const seenNotificationKeys = new Set()
+
 const useF1Store = create((set, get) => ({
   // ── Live session state (WebSocket) ──────────────────────────────────────────
   session: {
@@ -71,7 +74,13 @@ const useF1Store = create((set, get) => ({
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  setSession: (session) => set({ session }),
+  setSession: (session) => {
+    const cur = get().session
+    if (session.name && cur.name && session.name !== cur.name) {
+      seenNotificationKeys.clear()
+    }
+    set({ session })
+  },
 
   setTrackStatus: (trackStatus) => set({ trackStatus }),
 
@@ -104,27 +113,40 @@ const useF1Store = create((set, get) => ({
       }
     }),
 
-  addNotification: (notification) =>
+  addNotification: (notification) => {
+    let added = false
     set((state) => {
-      // Deduplicate: retirement notifications can only be added once per driver
-      if (notification.event === 'retirement' && notification.driverNumber) {
-        const hasExisting = state.notifications.some(
-          (n) => n.event === 'retirement' && String(n.driverNumber) === String(notification.driverNumber)
-        )
-        if (hasExisting) return state
-      }
-
-      // Deduplicate: race_start only once
-      if (notification.event === 'race_start') {
-        const hasExisting = state.notifications.some((n) => n.event === 'race_start')
-        if (hasExisting) return state
-      }
-
-      // General dedup: don't add the exact same title & message if present in last 10 seconds
-      const isDuplicate = state.notifications.some(
-        (n) => n.title === notification.title && n.message === notification.message && (Date.now() - new Date(n.timestamp).getTime() < 10000)
+      // 1. Build deterministic unique dedup key
+      const key = notification.dedupKey || (
+        notification.event === 'retirement' && notification.driverNumber
+          ? `retirement_${notification.driverNumber}`
+          : notification.event === 'race_start'
+          ? 'race_start'
+          : notification.event === 'chequered'
+          ? 'chequered'
+          : notification.event === 'rain'
+          ? 'rain'
+          : notification.event === 'pit_stop' && notification.driverNumber
+          ? `pit_${notification.driverNumber}_lap_${notification.lap ?? state.session.lap ?? ''}`
+          : `${notification.event || notification.type}_${notification.title}_${notification.message}`
       )
-      if (isDuplicate) return state
+
+      // 2. Reject if this notification was already shown previously in this session
+      if (seenNotificationKeys.has(key)) {
+        return state
+      }
+
+      // 3. Reject if an active card with identical title & message or dedupKey is currently in stack
+      const isDuplicateActive = state.notifications.some(
+        (n) => n.dedupKey === key || (n.title === notification.title && n.message === notification.message)
+      )
+      if (isDuplicateActive) {
+        return state
+      }
+
+      // Mark as permanently seen for this session
+      seenNotificationKeys.add(key)
+      added = true
 
       let filtered = state.notifications
       // If adding a pit stop notification for a driver, remove older pit stop cards for this driver
@@ -143,6 +165,7 @@ const useF1Store = create((set, get) => ({
         notifications: [
           {
             id: notification.id ?? Date.now(),
+            dedupKey: key,
             type: notification.type,
             event: notification.event,
             title: notification.title,
@@ -155,7 +178,14 @@ const useF1Store = create((set, get) => ({
           ...filtered.slice(0, 9),
         ],
       }
-    }),
+    })
+    return added
+  },
+
+  resetNotificationHistory: () => {
+    seenNotificationKeys.clear()
+    set({ notifications: [] })
+  },
 
   // Patch an existing notification (e.g. pit-stop exit updating live timer)
   updateNotification: (id, updates) =>
