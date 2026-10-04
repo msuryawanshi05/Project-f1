@@ -445,7 +445,11 @@ export default function Live() {
   const procTxt = (recentProcedureMsg?.message || recentProcedureMsg?.msg || '').toUpperCase()
   const isSuspended = procTxt.includes('SUSPEND') || procTxt.includes('DELAY')
   const isFormationLap = !isSuspended && (procTxt.includes('FORMATION LAP') || procTxt.includes('BEHIND SAFETY CAR'))
+  const currentLap = session.lap ?? sortedTiming[0]?.lap ?? (sortedTiming.length > 0 ? 1 : null)
+  const totalLaps = session.total_laps ?? weekendState.circuitData?.laps ?? 56
   const isSessionActive = isSuspended || isFormationLap || ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase) || (session.phase !== 'PRE' && (isLive || sortedTiming.length > 0)) || (sortedTiming.length > 0 && (isLive || isFormationLap || isSuspended))
+
+
 
   const sessionHeaderTitle = isSuspended
     ? 'START PROCEDURE SUSPENDED'
