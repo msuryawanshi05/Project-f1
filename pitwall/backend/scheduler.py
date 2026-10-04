@@ -92,6 +92,10 @@ def _extract_sessions_from_race(race: dict) -> list[dict]:
     if race.get("ThirdPractice", {}).get("date"):
         fp = race["ThirdPractice"]
         sessions.append(("FP3", fp["date"], fp.get("time", "12:00:00Z")))
+    # Sprint Qualifying (Sprint Shootout) — key: SprintQualifying
+    if race.get("SprintQualifying", {}).get("date"):
+        sq = race["SprintQualifying"]
+        sessions.append(("SprintQualifying", sq["date"], sq.get("time", "15:00:00Z")))
     # Sprint
     if race.get("Sprint", {}).get("date"):
         sp = race["Sprint"]
@@ -139,6 +143,7 @@ def _schedule_sessions(sessions: list[dict]) -> int:
         stop_dt  = s["dt"] + timedelta(hours=STOP_AFTER_HOURS)
 
         if start_dt > now:
+            # Future session — schedule both start and stop
             job_id = f"start_{s['race']}_{s['label']}"
             if job_id not in seen_starts:
                 _scheduler.add_job(
@@ -161,6 +166,25 @@ def _schedule_sessions(sessions: list[dict]) -> int:
                     "Scheduled: %s %s — start at %s UTC",
                     s["race"], s["label"], start_dt.strftime("%Y-%m-%d %H:%M"),
                 )
+
+        elif now >= start_dt and now < stop_dt:
+            # CATCH-UP: Session is active right now (backend restarted mid-session).
+            # SignalR already started via unconditional startup call.
+            # Schedule the stop job so auto-stop still fires at the right time.
+            stop_job_id = f"stop_{s['race']}_{s['label']}"
+            _scheduler.add_job(
+                _stop_and_clear,
+                trigger=DateTrigger(run_date=stop_dt),
+                id=stop_job_id,
+                misfire_grace_time=600,
+                replace_existing=True,
+            )
+            scheduled += 1
+            logger.info(
+                "Catch-up: Scheduled stop for in-progress %s %s — stop at %s UTC",
+                s["race"], s["label"], stop_dt.strftime("%Y-%m-%d %H:%M"),
+            )
+
     return scheduled
 
 
@@ -186,12 +210,9 @@ async def _schedule_from_jolpica():
     scheduled = _schedule_sessions(all_sessions)
     logger.info("Scheduler: %d future sessions scheduled", scheduled)
 
-    # If we're currently in a live window, start immediately
-    if _is_any_session_live_now(all_sessions):
-        logger.info("Scheduler: live session detected on startup — starting SignalR now")
-        _start_signalr()
-    else:
-        logger.info("Scheduler: no live session right now — SignalR idle (will auto-start before sessions)")
+    # Always start SignalR on startup to ensure coverage during live tests, in addition to scheduling
+    logger.info("Scheduler: starting SignalR client on startup...")
+    _start_signalr()
 
 
 def _load_sessions_from_circuits_json() -> list[dict]:

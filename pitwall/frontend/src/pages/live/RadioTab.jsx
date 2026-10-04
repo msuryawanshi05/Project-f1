@@ -260,10 +260,10 @@ function WeatherPanel({ weather }) {
       {/* Stat rows */}
       <div className="space-y-1 bg-pitwall-surface-2 p-3 rounded-sm border border-pitwall-border shadow-inner">
         {[
-          { label: 'TRACK TEMP',    value: `${weather.track_temperature ?? '—'}°C` },
-          { label: 'AIR TEMP',      value: `${weather.air_temperature ?? '—'}°C` },
-          { label: 'HUMIDITY', value: `${weather.humidity ?? '—'}%` },
-          { label: 'PRESSURE', value: `${weather.pressure ?? '—'} hPa` },
+          { label: 'TRACK TEMP', value: `${weather.track_temp ?? weather.track_temperature ?? '—'}°C` },
+          { label: 'AIR TEMP',   value: `${weather.air_temp ?? weather.air_temperature ?? '—'}°C` },
+          { label: 'HUMIDITY',   value: `${weather.humidity ?? '—'}%` },
+          { label: 'PRESSURE',   value: `${weather.pressure ?? '—'} hPa` },
         ].map(({ label, value }) => (
           <div key={label} className="flex items-baseline justify-between border-b border-pitwall-border pb-2 last:border-0 last:pb-0 pt-1">
             <span className="font-display text-[10px] font-bold text-pitwall-dim w-24 tracking-wider">{label}</span>
@@ -369,54 +369,66 @@ function RadioCard({ entry, isPlaying, onPlay, onStop, drivers }) {
 }
 
 // ── Radio Tab ─────────────────────────────────────────────────────────────────
-const MOCK_RADIO_POOL = [
+const LIVE_RADIO_TRANSMISSIONS = [
   {
-    driver_number: 4,
+    driver_number: 1,
     code: "NOR",
-    message: "I'm struggling with the rear tyre temperatures in sector 2, the car is sliding a lot.",
-    duration: 3.5,
+    message: "Lots of spray behind the pack. Keep me updated on visibility and turn 15 water.",
   },
   {
     driver_number: 44,
     code: "HAM",
-    message: "Tyres feel okay for now, but let's monitor the gap to the car behind.",
-    duration: 2.8,
+    message: "Car feels balanced on the intermediates. Let's see how the track develops.",
+  },
+  {
+    driver_number: 3,
+    code: "VER",
+    message: "Brake temperatures are dropping behind the safety car, picking up the pace.",
   },
   {
     driver_number: 16,
     code: "LEC",
-    message: "Plan A looks solid, pace is good. I can keep this up for another 5 laps.",
-    duration: 3.2,
+    message: "Standing water on the exit of turn 4 and turn 11. Very low traction.",
+  },
+  {
+    driver_number: 12,
+    code: "ANT",
+    message: "Radio check, loud and clear. Tyre blankets off, inters feel good.",
+  },
+  {
+    driver_number: 6,
+    code: "HAD",
+    message: "Understood, delta is positive. Managing temperatures on the formation lap.",
   },
   {
     driver_number: 81,
     code: "PIA",
-    message: "Confirm if we are switching to hard compound for the next stint.",
-    duration: 2.5,
-  },
-  {
-    driver_number: 1,
-    code: "VER",
-    message: "Check the wind direction at turn 15, it feels very gusty out there.",
-    duration: 4.0,
+    message: "Track surface is greasy, front tyres taking time to switch on.",
   },
   {
     driver_number: 63,
     code: "RUS",
-    message: "Let's push now, I have clean air ahead. What is the lap time target?",
-    duration: 3.0,
+    message: "Copy that, safety car speed is okay now. Ready for race start.",
+  },
+  {
+    driver_number: 14,
+    code: "ALO",
+    message: "Good morning guys, let's have a clean start. Inters are the right call.",
+  },
+  {
+    driver_number: 5,
+    code: "BOR",
+    message: "Confirming engine mode 2 for the start procedure. All systems normal.",
   },
   {
     driver_number: 55,
     code: "SAI",
-    message: "We need more front wing in the next stop. Understeer in turn 8.",
-    duration: 3.8,
+    message: "Understeer in turn 8, but car is drivable. Let's keep our heads down.",
   },
   {
-    driver_number: 3,
-    code: "RIC",
-    message: "Brakes are getting slightly soft, checking temperatures on the straight.",
-    duration: 3.2,
+    driver_number: 10,
+    code: "GAS",
+    message: "Visibility is zero into turn 1 if you are right behind someone.",
   }
 ]
 
@@ -427,24 +439,30 @@ export default function RadioTab() {
   const playingId      = useF1Store((s) => s.playingRadioId)
   const setPlayingId   = useF1Store((s) => s.setPlayingRadioId)
   const sessionKey     = useF1Store((s) => s.currentSessionKey)
+  const raceControl    = useF1Store((s) => s.raceControl)
 
-  // Initialize with the first 5 mock clips, keyed by date/time
-  const [radioClips, setRadioClips] = useState(() => {
-    return MOCK_RADIO_POOL.slice(0, 5).map((clip, i) => ({
-      ...clip,
-      id: `mock-r-${i}`,
-      date: new Date(Date.now() - (i * 90) * 1000).toISOString(),
-      lap: Math.max(1, 10 - i),
-      recording_url: 'mock-audio',
-    }))
+  const isFormationLap = raceControl.some((m) => {
+    const txt = (m.message || m.msg || '').toUpperCase()
+    return txt.includes('FORMATION LAP') || txt.includes('START PROCEDURE')
   })
 
+  const isLive = isFormationLap || (session.phase !== 'PRE' && ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase))
+
+  // Never pre-populate with past race clips — always start empty
+  const [radioClips, setRadioClips] = useState([])
+
+  // Clear clips whenever session is not actively live
+  useEffect(() => {
+    if (!isLive) {
+      setRadioClips([])
+    }
+  }, [isLive])
+
   const feedRef = useRef(null)
-  const isLive  = ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
 
   // Fetch real team radio clips from OpenF1
   const fetchRealRadio = useCallback(async () => {
-    if (!sessionKey) return []
+    if (!isLive || !sessionKey) return []
     try {
       const PROXY = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000') + '/api/openf1'
       const res = await fetch(`${PROXY}/v1/team_radio?session_key=${sessionKey}`)
@@ -459,7 +477,7 @@ export default function RadioTab() {
             driver_number: item.driver_number,
             code,
             date: item.date,
-            lap: session.lap ?? 1,
+            lap: session.lap ? `LAP ${session.lap}` : (isFormationLap ? 'FORMATION LAP' : 'LAP 1'),
             recording_url: item.recording_url,
             message: `INTERCEPTED TEAM TRANSMISSION FROM DRIVER ${code}`,
           }
@@ -467,11 +485,11 @@ export default function RadioTab() {
       }
     } catch (_) {}
     return []
-  }, [sessionKey, session.lap, drivers])
+  }, [isLive, sessionKey, session.lap, isFormationLap, drivers])
 
-  // Initial load fetch for real radio
+  // Initial load fetch for real radio only during live session
   useEffect(() => {
-    if (!sessionKey) return
+    if (!isLive || !sessionKey) return
     let active = true
     fetchRealRadio().then((realClips) => {
       if (active && realClips.length > 0) {
@@ -479,9 +497,9 @@ export default function RadioTab() {
       }
     })
     return () => { active = false }
-  }, [sessionKey, fetchRealRadio])
+  }, [isLive, sessionKey, fetchRealRadio])
 
-  // Poll real OpenF1 radio every 20s
+  // Poll real OpenF1 radio every 20s during live session
   useEffect(() => {
     if (!isLive || !sessionKey) return
     
@@ -500,30 +518,33 @@ export default function RadioTab() {
     return () => clearInterval(fetchInterval)
   }, [isLive, sessionKey, fetchRealRadio])
 
-  // Fallback simulator: Inject mock transmissions periodically if real OpenF1 is returning 401
+  // Simulated live interceptor: only injects during active live race/formation lap
   useEffect(() => {
     if (!isLive) return
     
     const interval = setInterval(() => {
       setRadioClips((prev) => {
-        // If we have successfully loaded real clips, stop injecting mock clips!
+        // If we have successfully loaded real clips, stop injecting simulated clips!
         const hasRealClips = prev.some((c) => String(c.id).startsWith('real-r-'))
         if (hasRealClips) return prev
         
-        const rand = MOCK_RADIO_POOL[Math.floor(Math.random() * MOCK_RADIO_POOL.length)]
+        const rand = LIVE_RADIO_TRANSMISSIONS[Math.floor(Math.random() * LIVE_RADIO_TRANSMISSIONS.length)]
+        const d = drivers.find((drv) => String(drv.number) === String(rand.driver_number)) ?? {}
+        const code = d.short_name ?? d.code ?? rand.code
+        
         const newClip = {
           ...rand,
-          id: `mock-r-${Date.now()}`,
+          id: `sim-r-${Date.now()}-${rand.driver_number}`,
           date: new Date().toISOString(),
-          lap: session.lap ?? 12,
+          lap: session.lap ? `LAP ${session.lap}` : isFormationLap ? 'FORMATION LAP' : 'LAP 1',
           recording_url: 'mock-audio',
         }
         return [newClip, ...prev].slice(0, 20)
       })
-    }, 45000)
+    }, 35000)
 
     return () => clearInterval(interval)
-  }, [isLive, session.lap])
+  }, [isLive, session.lap, isFormationLap, drivers])
 
   // Auto-scroll to top when a new clip arrives
   useEffect(() => {
@@ -540,24 +561,21 @@ export default function RadioTab() {
     stopClip(setPlayingId)
   }
 
-  const showPreSessionGrid = radioClips.length === 0 && !weather
-
-  if (showPreSessionGrid) {
+  // Standby screen when session is not active
+  if (!isLive) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-200px)] bg-pitwall-bg w-full">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-4xl w-full px-6">
           <EmptyState
             icon="📻"
-            title="Radio Transmissions Offline"
-            message="Radio transmissions available during live sessions only."
+            title="Radio Feed Standby"
+            message="Team radio transmissions will be intercepted during the live race session only."
             className="w-full my-0"
           />
-          <EmptyState
-            icon="🌦️"
-            title="Weather Offline"
-            message="No active weather telemetry from the local track weather station."
-            className="w-full my-0"
-          />
+          <div className="bg-pitwall-surface border border-pitwall-border p-4 rounded-sm flex flex-col justify-center">
+            <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase mb-3">Live Track Weather</div>
+            <WeatherPanel weather={weather} />
+          </div>
         </div>
       </div>
     )

@@ -10,6 +10,7 @@ The signalrcore library is synchronous/threaded — we bridge to asyncio
 via loop.call_soon_threadsafe to put items into the queue safely.
 """
 import asyncio
+import copy
 import json
 import logging
 import threading
@@ -67,37 +68,107 @@ def _envelope(msg_type: str, data: dict) -> dict:
 
 # ── Cleaner functions — one per message type ─────────────────────────────────
 
+def parse_lap_time_to_seconds(lap_str: str) -> Optional[float]:
+    """Convert '1:29.412' or '31.221' into float seconds."""
+    if not lap_str:
+        return None
+    try:
+        if ":" in lap_str:
+            parts = lap_str.split(":")
+            mins = int(parts[0])
+            secs = float(parts[1])
+            return mins * 60 + secs
+        else:
+            return float(lap_str)
+    except Exception:
+        return None
+
+
 def clean_timing(raw: dict) -> dict:
     """TimingData → {drivers: [...]}"""
     lines = raw.get("Lines", {})
     drivers = []
-    for num_str, d in lines.items():
+    items = lines.items() if isinstance(lines, dict) else enumerate(lines) if isinstance(lines, list) else []
+    for key, d in items:
+        if not isinstance(d, dict):
+            continue
+        num_str = str(d.get("RacingNumber") or key)
         try:
-            s1 = d.get("Sectors", {}).get("0", {})
-            s2 = d.get("Sectors", {}).get("1", {})
-            s3 = d.get("Sectors", {}).get("2", {})
-            gaps = d.get("IntervalToPositionAhead", {})
+            sectors_raw = d.get("Sectors") or {}
+            if isinstance(sectors_raw, list):
+                s1 = sectors_raw[0] if len(sectors_raw) > 0 and isinstance(sectors_raw[0], dict) else {}
+                s2 = sectors_raw[1] if len(sectors_raw) > 1 and isinstance(sectors_raw[1], dict) else {}
+                s3 = sectors_raw[2] if len(sectors_raw) > 2 and isinstance(sectors_raw[2], dict) else {}
+            elif isinstance(sectors_raw, dict):
+                s1 = sectors_raw.get("0") if isinstance(sectors_raw.get("0"), dict) else {}
+                s2 = sectors_raw.get("1") if isinstance(sectors_raw.get("1"), dict) else {}
+                s3 = sectors_raw.get("2") if isinstance(sectors_raw.get("2"), dict) else {}
+            else:
+                s1, s2, s3 = {}, {}, {}
 
             def _seg_status(seg: dict) -> str:
+                if not isinstance(seg, dict):
+                    return ""
                 val = seg.get("Value", "")
                 clr = int(seg.get("Colour", 0)) if seg.get("Colour") else 0
                 return _SEGMENT_COLOUR.get(clr, "yellow") if val else ""
 
+            last_lap_dict = d.get("LastLapTime") if isinstance(d.get("LastLapTime"), dict) else {}
+            last_lap_val = last_lap_dict.get("Value", "") if last_lap_dict else (str(d.get("LastLapTime") or "") if not isinstance(d.get("LastLapTime"), (dict, list)) else "")
+            s1_val = s1.get("Value", "") if isinstance(s1, dict) else ""
+            s2_val = s2.get("Value", "") if isinstance(s2, dict) else ""
+            s3_val = s3.get("Value", "") if isinstance(s3, dict) else ""
+            
+            last_lap_sec = parse_lap_time_to_seconds(last_lap_val)
+            s1_sec = parse_lap_time_to_seconds(s1_val)
+            s2_sec = parse_lap_time_to_seconds(s2_val)
+            s3_sec = parse_lap_time_to_seconds(s3_val)
+            
+            is_personal_fastest = bool(last_lap_dict.get("PersonalFastest", False))
+            is_overall_fastest = bool(last_lap_dict.get("OverallFastest", False))
+
+            pos_val = d.get("Position", d.get("position", d.get("Line", 0)))
+            try:
+                pos_int = int(pos_val) if pos_val else 0
+            except (ValueError, TypeError):
+                pos_int = 0
+
+            gap_ahead = d.get("IntervalToPositionAhead", {})
+            gap_ahead_val = gap_ahead.get("Value", "") if isinstance(gap_ahead, dict) else (str(gap_ahead or "") if not isinstance(gap_ahead, list) else "")
+
+            gap_leader = d.get("GapToLeader", {})
+            gap_leader_val = gap_leader.get("Value", "") if isinstance(gap_leader, dict) else (str(gap_leader or "") if not isinstance(gap_leader, list) else "")
+
+            lap_val = d.get("NumberOfLaps") or d.get("Laps") or d.get("lap")
+
             drivers.append({
                 "number":        int(num_str),
                 "code":          d.get("RacingNumber", num_str),
-                "position":      int(d.get("Line", 0)),
-                "gap_to_leader": d.get("GapToLeader", ""),
-                "gap_to_ahead":  gaps.get("Value", ""),
-                "last_lap":      d.get("LastLapTime", {}).get("Value", ""),
-                "sector_1":      {"time": s1.get("Value", ""), "status": _seg_status(s1)},
-                "sector_2":      {"time": s2.get("Value", ""), "status": _seg_status(s2)},
-                "sector_3":      {"time": s3.get("Value", ""), "status": _seg_status(s3)},
+                "position":      pos_int,
+                "gap_to_leader": gap_leader_val,
+                "gap_to_ahead":  gap_ahead_val,
+                "last_lap":      last_lap_val,
+                "lap":           lap_val,
+                "sector_1":      {"time": s1_val, "status": _seg_status(s1)},
+                "sector_2":      {"time": s2_val, "status": _seg_status(s2)},
+                "sector_3":      {"time": s3_val, "status": _seg_status(s3)},
                 "in_pit":        bool(d.get("InPit", False)),
                 "pit_out":       bool(d.get("PitOut", False)),
                 "stopped":       bool(d.get("Stopped", False)),
                 "knockout":      bool(d.get("KnockedOut", False)),
                 "deleted_lap":   bool(d.get("DeletedLap", False)),
+                # Frontend compatible fields
+                "last_lap_time_in_s": last_lap_sec,
+                "s1_time_in_s":       s1_sec,
+                "s2_time_in_s":       s2_sec,
+                "s3_time_in_s":       s3_sec,
+                "s1_colour":          _seg_status(s1),
+                "s2_colour":          _seg_status(s2),
+                "s3_colour":          _seg_status(s3),
+                "pitting":            bool(d.get("InPit", False)),
+                "last_lap_deleted":   bool(d.get("DeletedLap", False)),
+                "personal_fastest":   is_personal_fastest,
+                "overall_fastest":    is_overall_fastest,
             })
         except Exception:
             logger.exception("clean_timing failed for driver %s", num_str)
@@ -108,25 +179,62 @@ def clean_tyres(raw: dict) -> dict:
     """TimingAppData → {drivers: [...]}"""
     lines = raw.get("Lines", {})
     drivers = []
-    for num_str, d in lines.items():
+    items = lines.items() if isinstance(lines, dict) else enumerate(lines) if isinstance(lines, list) else []
+    for key, d in items:
+        if not isinstance(d, dict):
+            continue
+        num_str = str(d.get("RacingNumber") or key)
         try:
-            stint = d.get("Stints", {})
-            # stints is a dict keyed "0","1","2"… take the last one
-            if stint:
-                last_key = max(stint.keys(), key=lambda k: int(k))
-                s = stint[last_key]
+            stint_raw = d.get("Stints", {})
+            stint_list = []
+
+
+            # Stints can arrive as dict {"0": {...}} or list [{...}]
+            if isinstance(stint_raw, dict):
+                stint_items = [(int(k), v) for k, v in stint_raw.items() if isinstance(v, dict)]
+            elif isinstance(stint_raw, list):
+                stint_items = [(i, v) for i, v in enumerate(stint_raw) if isinstance(v, dict)]
             else:
-                s = {}
+                stint_items = []
+
+            # Map all stints with their index
+            for idx, s in stint_items:
+                stint_list.append({
+                    "stint_index":  idx,
+                    "compound":     s.get("Compound", "UNKNOWN").upper(),
+                    "laps":         int(s.get("TotalLaps", 0)),
+                    "new_tyre":     bool(s.get("New", True)),
+                })
+
+            # Sort stints by index
+            stint_list.sort(key=lambda x: x["stint_index"])
+
+            if stint_list:
+                s_last = stint_list[-1]
+                comp = s_last.get("compound", "UNKNOWN")
+                age = s_last.get("laps", 0)
+                stint_num = s_last.get("stint_index", 0) + 1
+                new_t = s_last.get("new_tyre", True)
+            else:
+                comp = "UNKNOWN"
+                age = 0
+                stint_num = 1
+                new_t = True
+
             drivers.append({
                 "number":       int(num_str),
-                "compound":     s.get("Compound", "UNKNOWN").upper(),
-                "tyre_age":     int(s.get("TotalLaps", 0)),
-                "stint_number": int(last_key) + 1 if stint else 1,
-                "new_tyre":     bool(s.get("New", True)),
+                "compound":     comp,
+                "tyre_age":     age,
+                "age":          age,
+                "laps":         age,
+                "stint_number": stint_num,
+                "new_tyre":     new_t,
+                "stints":       stint_list,
             })
         except Exception:
             logger.exception("clean_tyres failed for driver %s", num_str)
     return {"drivers": drivers}
+
 
 
 def clean_car_data(raw: dict) -> dict:
@@ -145,6 +253,7 @@ def clean_car_data(raw: dict) -> dict:
                     "speed":    int(chan.get("2", 0)),
                     "rpm":      int(chan.get("3", 0)),
                     "gear":     int(chan.get("4", 0)),
+                    "n_gear":   int(chan.get("4", 0)),
                     "throttle": int(chan.get("5", 0)),
                     "brake":    int(chan.get("6", 0)),   # binary: 0 or 100
                     "drs":      _DRS_MAP.get(drs_raw, "off"),
@@ -186,7 +295,7 @@ def clean_weather(raw: dict) -> dict:
         "air_temp":      _f("AirTemp"),
         "track_temp":    _f("TrackTemp"),
         "humidity":      _f("Humidity"),
-        "wind_speed":    _f("WindSpeed"),
+        "wind_speed":    round(_f("WindSpeed") * 3.6, 1),   # F1 sends m/s → convert to km/h
         "wind_direction": int(_f("WindDirection")),
         "rainfall":      raw.get("Rainfall", "0") not in (0, "0", False, "False"),
         "pressure":      _f("Pressure"),
@@ -196,15 +305,29 @@ def clean_weather(raw: dict) -> dict:
 def clean_session(raw: dict) -> dict:
     """SessionInfo / SessionData → session envelope"""
     # SessionInfo shape
-    name   = raw.get("Name", raw.get("Type", "Unknown"))
-    status = raw.get("Status", raw.get("StatusSeries", [{}])[-1].get("SessionStatus", ""))
-    clock  = raw.get("Clock", raw.get("SystemTime", ""))
+    name = raw.get("Name", raw.get("Type", "Unknown"))
+    
+    status_series = raw.get("StatusSeries", {})
+    status = ""
+    if isinstance(status_series, dict) and status_series:
+        try:
+            last_key = max(status_series.keys(), key=lambda k: int(k))
+            status = status_series[last_key].get("SessionStatus", "")
+        except (ValueError, TypeError):
+            pass
+    elif isinstance(status_series, list) and status_series:
+        status = status_series[-1].get("SessionStatus", "") if isinstance(status_series[-1], dict) else ""
+    
+    if not status:
+        status = raw.get("Status", "")
+
+    clock = raw.get("Clock", raw.get("SystemTime", ""))
 
     # Derive phase
     status_lower = str(status).lower()
     if "finished" in status_lower or "ends" in status_lower:
         phase = "FINISHED"
-    elif "started" in status_lower or "green" in status_lower:
+    elif any(k in status_lower for k in ["started", "green", "active", "formation", "running", "racing"]):
         phase = "LIVE"
     else:
         phase = "PRE"
@@ -230,23 +353,32 @@ def clean_track_status(raw: dict) -> dict:
 def clean_driver_list(raw: dict) -> dict:
     """DriverList → {drivers: [...]}"""
     drivers = []
-    for num_str, d in raw.items():
+    items = raw.items() if isinstance(raw, dict) else enumerate(raw) if isinstance(raw, list) else []
+    for key, d in items:
         if not isinstance(d, dict):
             continue
         try:
-            colour = d.get("TeamColour", "")
+            num_str = str(d.get("RacingNumber") or d.get("racingNumber") or key)
+            tla = d.get("Tla", d.get("tla", num_str))
+            first_name = d.get("FirstName", d.get("firstName", ""))
+            last_name = d.get("LastName", d.get("lastName", ""))
+            team = d.get("TeamName", d.get("teamName", ""))
+            colour = d.get("TeamColour", d.get("teamColour", ""))
+            
             if colour and not colour.startswith("#"):
                 colour = "#" + colour
+                
             drivers.append({
                 "number":    int(num_str),
-                "code":      d.get("Tla", num_str),
-                "full_name": f"{d.get('FirstName', '')} {d.get('LastName', '')}".strip(),
-                "team":      d.get("TeamName", ""),
+                "code":      tla,
+                "full_name": f"{first_name} {last_name}".strip(),
+                "team":      team,
                 "team_colour": colour,
             })
         except Exception:
-            logger.exception("clean_driver_list failed for driver %s", num_str)
+            logger.exception("clean_driver_list failed for driver %s", str(key))
     return {"drivers": drivers}
+
 
 
 # ── Topic router ──────────────────────────────────────────────────────────────
@@ -277,6 +409,18 @@ def _route_message(topic: str, data: dict) -> Optional[dict]:
         return None
 
 
+def deep_merge(target: dict, source: dict) -> None:
+    """Recursively merge source dict into target dict using deep copies for new dicts."""
+    for k, v in source.items():
+        if isinstance(v, dict):
+            if k in target and isinstance(target[k], dict):
+                deep_merge(target[k], v)
+            else:
+                target[k] = copy.deepcopy(v)
+        else:
+            target[k] = v
+
+
 # ── Main client class ─────────────────────────────────────────────────────────
 
 class PitwallSignalRClient:
@@ -295,6 +439,19 @@ class PitwallSignalRClient:
         self._queue: Optional[asyncio.Queue] = None
         self._running = False
         self._connected = False
+        self._clear_raw_states()
+
+    def _clear_raw_states(self) -> None:
+        self._raw_states = {
+            "TimingData": {},
+            "TimingAppData": {},
+            "DriverList": {},
+            "WeatherData": {},
+            "SessionState": {},
+            "TrackStatus": {},
+            "LapCount": {},
+            "RaceControlMessages": {"Messages": []},
+        }
 
     def start(self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue) -> None:
         """Start the SignalR client in a background daemon thread."""
@@ -316,6 +473,7 @@ class PitwallSignalRClient:
                 self._connection.stop()
             except Exception:
                 pass
+        self._clear_raw_states()
         logger.info("SignalR client stopped")
 
     def _put_message(self, envelope: dict) -> None:
@@ -323,22 +481,94 @@ class PitwallSignalRClient:
         if self._loop and self._queue:
             self._loop.call_soon_threadsafe(self._queue.put_nowait, envelope)
 
+    def _process_message(self, topic: str, data_raw: dict) -> None:
+        """Merge raw message deltas into self._raw_states and put cleaned message into the queue."""
+        if topic in ("SessionInfo", "SessionData"):
+            target_topic = "SessionState"
+        else:
+            target_topic = topic
+
+        if target_topic in self._raw_states:
+            if target_topic == "RaceControlMessages":
+                new_msgs = data_raw.get("Messages", [])
+                if isinstance(new_msgs, dict):
+                    new_msgs = list(new_msgs.values())
+                elif not isinstance(new_msgs, list):
+                    new_msgs = [new_msgs] if new_msgs else []
+                
+                # Deduplicate and append
+                existing_utcs = {m.get("Utc") for m in self._raw_states["RaceControlMessages"]["Messages"] if isinstance(m, dict) and m.get("Utc")}
+                for msg in new_msgs:
+                    if isinstance(msg, dict):
+                        if msg.get("Utc") not in existing_utcs:
+                            self._raw_states["RaceControlMessages"]["Messages"].append(msg)
+                
+                # Limit size to last 100 messages
+                self._raw_states["RaceControlMessages"]["Messages"] = self._raw_states["RaceControlMessages"]["Messages"][-100:]
+
+                # Check if race control announced formation lap / session start
+                rc_formation = False
+                for m in self._raw_states["RaceControlMessages"]["Messages"][-15:]:
+                    txt = (m.get("Message", "") if isinstance(m, dict) else "").upper()
+                    if any(k in txt for k in ["FORMATION LAP", "BEHIND SAFETY CAR", "START PROCEDURE", "RACE START"]):
+                        rc_formation = True
+                        break
+
+                if rc_formation and "SessionState" in self._raw_states:
+                    sess_data = self._raw_states["SessionState"]
+                    cur_status = sess_data.get("Status", "")
+                    if str(cur_status).lower() not in ["started", "active", "green"]:
+                        sess_data["Status"] = "FormationLap"
+                        if not sess_data.get("Name") or sess_data.get("Name") == "Unknown":
+                            sess_data["Name"] = "FORMATION LAP"
+                        sess_env = _route_message("SessionInfo", sess_data)
+                        if sess_env:
+                            self._put_message(sess_env)
+            else:
+                deep_merge(self._raw_states[target_topic], data_raw)
+            
+            clean_topic = "SessionInfo" if target_topic == "SessionState" else target_topic
+            envelope = _route_message(clean_topic, self._raw_states[target_topic])
+            if envelope:
+                self._put_message(envelope)
+        else:
+            # Topic not stateful (e.g. CarData.z) - clean and broadcast immediately
+            envelope = _route_message(topic, data_raw)
+            if envelope:
+                self._put_message(envelope)
+
     def _handle_feed(self, msg) -> None:
         """Called by signalrcore for every feed message (on 'feed' hub method)."""
         if isinstance(msg, CompletionMessage):
-            # Initial state snapshot — a list of [topic, data, ''] tuples
+            # Initial state snapshot — dict {topic: data} or list of [topic, data, ''] tuples
+            logger.info("Received CompletionMessage initial state snapshot")
             try:
-                for item in msg.result:
-                    if isinstance(item, list) and len(item) >= 2:
-                        topic, data_raw = item[0], item[1]
+                if isinstance(msg.result, dict):
+                    for topic, data_raw in msg.result.items():
                         if isinstance(data_raw, str):
+                            data_raw = (data_raw
+                                        .replace("'", '"')
+                                        .replace("True", "true")
+                                        .replace("False", "false"))
                             try:
                                 data_raw = json.loads(data_raw)
                             except json.JSONDecodeError:
                                 continue
-                        envelope = _route_message(topic, data_raw)
-                        if envelope:
-                            self._put_message(envelope)
+                        self._process_message(topic, data_raw)
+                elif isinstance(msg.result, list):
+                    for item in msg.result:
+                        if isinstance(item, list) and len(item) >= 2:
+                            topic, data_raw = item[0], item[1]
+                            if isinstance(data_raw, str):
+                                data_raw = (data_raw
+                                            .replace("'", '"')
+                                            .replace("True", "true")
+                                            .replace("False", "false"))
+                                try:
+                                    data_raw = json.loads(data_raw)
+                                except json.JSONDecodeError:
+                                    continue
+                            self._process_message(topic, data_raw)
             except Exception:
                 logger.exception("Failed processing CompletionMessage")
             return
@@ -361,9 +591,7 @@ class PitwallSignalRClient:
                 logger.debug("JSON decode error for topic %s", topic)
                 return
 
-        envelope = _route_message(topic, data_raw)
-        if envelope:
-            self._put_message(envelope)
+        self._process_message(topic, data_raw)
 
     def _on_connect(self) -> None:
         self._connected = True
@@ -375,24 +603,18 @@ class PitwallSignalRClient:
 
     def _run(self) -> None:
         """Blocking: negotiate, connect, subscribe, supervise. Retries on failure."""
-        MAX_RETRIES  = 5
-        RETRY_DELAY  = 10  # seconds between attempts
+        RETRY_DELAY = 10  # seconds between attempts
 
-        for attempt in range(1, MAX_RETRIES + 1):
+        while self._running:
+            logger.info("SignalR connection starting...")
+            self._attempt_connect()
             if not self._running:
                 break
-            logger.info("SignalR connection attempt %d/%d", attempt, MAX_RETRIES)
-            success = self._attempt_connect()
-            if success:
-                return
-            if attempt < MAX_RETRIES:
-                logger.warning(
-                    "SignalR attempt %d failed — retrying in %ds",
-                    attempt, RETRY_DELAY,
-                )
-                time.sleep(RETRY_DELAY)
-
-        logger.error("SignalR: max retries reached — giving up")
+            logger.warning(
+                "SignalR disconnected or failed to connect — retrying in %ds",
+                RETRY_DELAY,
+            )
+            time.sleep(RETRY_DELAY)
 
     def _attempt_connect(self) -> bool:
         """Single connection attempt. Returns True if session ran successfully."""
@@ -406,7 +628,6 @@ class PitwallSignalRClient:
 
             options = {
                 "verify_ssl": True,
-                "access_token_factory": None,   # no_auth mode
                 "headers": headers,
             }
 

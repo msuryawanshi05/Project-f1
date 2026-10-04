@@ -40,5 +40,8 @@ adapters/
 docs/
 scripts/
 
-# Logs
+# Logs & Databases
 *.log
+*.db
+*.sqlite
+*.sqlite3

@@ -53,6 +53,7 @@ export function useWebSocket() {
     setCurrentSessionKey,
     updateBestLap,
     updateGapHistory,
+    resetLiveSession,
   } = useF1Store()
 
   // ── Route a parsed message into the store ─────────────────────────────────
@@ -67,16 +68,24 @@ export function useWebSocket() {
     switch (type) {
       case 'session': {
         const cur = useF1Store.getState().session
-        const hasActiveLaps = Boolean((cur.lap && cur.lap >= 1) || (data.lap && data.lap >= 1))
-        const incomingPhase = (data.phase === 'PRE' && hasActiveLaps) ? 'LIVE' : (data.phase || cur.phase)
+        const raceControlMsgs = useF1Store.getState().raceControl
+        const isFormationOrActive = raceControlMsgs.some(m => {
+          const t = (m.message || m.msg || '').toUpperCase()
+          return t.includes('FORMATION LAP') || t.includes('START PROCEDURE')
+        })
+        const isPre = data.phase === 'PRE' && !isFormationOrActive
+        const incomingPhase = isFormationOrActive ? 'LIVE' : (data.phase || cur.phase)
         setSession({
           ...cur,
           ...data,
-          name: data.name || cur.name,
-          lap: data.lap ?? cur.lap,
+          name: isFormationOrActive && (!data.name || data.name === 'Unknown') ? 'FORMATION LAP' : (data.name || cur.name),
+          lap: isPre ? null : (data.lap ?? cur.lap ?? 0),
           total_laps: data.total_laps ?? cur.total_laps,
           phase: incomingPhase,
         })
+        if (isPre && cur.phase !== 'PRE') {
+          resetLiveSession()
+        }
         break
       }
       case 'track_status':
@@ -88,6 +97,13 @@ export function useWebSocket() {
       case 'timing': {
         const drivers = data.drivers ?? []
         setTiming(drivers)
+        if (drivers.length > 0) {
+          const cur = useF1Store.getState().session
+          const hasLiveCars = drivers.some(d => d.pit_out || !d.in_pit || d.last_lap || d.gap_to_leader)
+          if (hasLiveCars && cur.phase === 'PRE') {
+            setSession({ ...cur, phase: 'LIVE' })
+          }
+        }
         // Accumulate best laps for qualifying mode
         drivers.forEach((d) => {
           if (d.last_lap) {
@@ -111,6 +127,20 @@ export function useWebSocket() {
       case 'race_control':
         if (Array.isArray(data.messages)) {
           data.messages.forEach(addRaceControl)
+          const hasFormation = data.messages.some(m => {
+            const t = (m.message || m.msg || '').toUpperCase()
+            return t.includes('FORMATION LAP') || t.includes('START PROCEDURE')
+          })
+          if (hasFormation) {
+            const cur = useF1Store.getState().session
+            if (cur.phase !== 'LIVE') {
+              setSession({
+                ...cur,
+                name: cur.name && cur.name !== 'Unknown' ? cur.name : 'FORMATION LAP',
+                phase: 'LIVE',
+              })
+            }
+          }
         }
         break
       case 'car_data':
@@ -123,12 +153,12 @@ export function useWebSocket() {
         break
       case 'lap_count': {
         const curSession = useF1Store.getState().session
-        const isLive = Boolean(data.current && data.current >= 1)
+        const isLive = Boolean(data.current && data.current >= 1 && curSession.phase !== 'PRE')
         setSession({
           ...curSession,
           lap: data.current ?? curSession.lap,
           total_laps: data.total || curSession.total_laps,
-          phase: (curSession.phase === 'PRE' && isLive) ? 'LIVE' : curSession.phase,
+          phase: isLive ? 'LIVE' : curSession.phase,
         })
         break
       }

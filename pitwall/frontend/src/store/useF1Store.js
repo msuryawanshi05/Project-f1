@@ -82,6 +82,16 @@ const useF1Store = create((set, get) => ({
     set({ session })
   },
 
+  resetLiveSession: () => set({
+    timing: [],
+    tyres: [],
+    carData: {},
+    carDataHistory: {},
+    gapHistory: [],
+    pitStops: [],
+    bestLaps: {},
+  }),
+
   setTrackStatus: (trackStatus) => set({ trackStatus }),
 
   setDrivers: (drivers) => set({ drivers }),

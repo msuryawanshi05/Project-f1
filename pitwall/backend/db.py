@@ -53,12 +53,32 @@ async def cache_set(key: str, value: dict) -> None:
         logger.exception("cache_set failed for key=%r", key)
 
 
-async def cache_get(key: str) -> dict | None:
-    """Return the cached dict for `key`, or None if not found."""
+CACHE_TTL_SECONDS = 3 * 3600  # 3 hours max cache retention
+
+
+async def cache_prune_expired() -> int:
+    """Delete any cached rows older than CACHE_TTL_SECONDS."""
     try:
+        cutoff = time.time() - CACHE_TTL_SECONDS
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute("DELETE FROM session_cache WHERE updated_at < ?", (cutoff,))
+            deleted = cursor.rowcount
+            await db.commit()
+        if deleted > 0:
+            logger.info("Pruned %d expired session cache entries", deleted)
+        return deleted
+    except Exception:
+        logger.exception("cache_prune_expired failed")
+        return 0
+
+
+async def cache_get(key: str) -> dict | None:
+    """Return the cached dict for `key`, or None if not found or expired."""
+    try:
+        cutoff = time.time() - CACHE_TTL_SECONDS
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT value FROM session_cache WHERE key = ?", (key,)
+                "SELECT value FROM session_cache WHERE key = ? AND updated_at >= ?", (key, cutoff)
             ) as cursor:
                 row = await cursor.fetchone()
         if row:
@@ -70,10 +90,13 @@ async def cache_get(key: str) -> dict | None:
 
 
 async def cache_get_all() -> dict:
-    """Return all cached entries as {key: dict}. Used to hydrate new ws clients."""
+    """Return all valid (non-expired) cached entries as {key: dict}. Prunes expired rows."""
     result: dict = {}
     try:
+        cutoff = time.time() - CACHE_TTL_SECONDS
         async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM session_cache WHERE updated_at < ?", (cutoff,))
+            await db.commit()
             async with db.execute("SELECT key, value FROM session_cache") as cursor:
                 rows = await cursor.fetchall()
         for key, raw in rows:
@@ -95,3 +118,4 @@ async def cache_clear() -> None:
         logger.info("Session cache cleared")
     except Exception:
         logger.exception("cache_clear failed")
+

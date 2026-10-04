@@ -5,7 +5,7 @@ import useF1Store from '../store/useF1Store'
 import useRaceWeekendState from '../hooks/useRaceWeekendState'
 import RaceStoryStack from '../components/results/RaceStoryStack'
 import { EmptyState } from '../components/ui/EmptyState'
-import { getCountryAbbreviation } from '../utils/driverUtils'
+import { getCountryAbbreviation, getRaceStatus } from '../utils/driverUtils'
 import { useTilt } from '../hooks/useTilt'
 
 const BASE = 'https://api.jolpi.ca/ergast/f1/2026'
@@ -143,14 +143,24 @@ export default function Results() {
   const [showStory, setShowStory]  = useState(false)
 
   const now       = new Date()
-  const pastRaces = calendar.filter((r) => new Date(r.date) < now)
+  const pastRaces = calendar.filter((r) => getRaceStatus(r, now).isDone)
+  const ongoingRace = calendar.find((r) => getRaceStatus(r, now).isOngoing)
+  const nextUpcoming = calendar.find((r) => !getRaceStatus(r, now).isDone && !getRaceStatus(r, now).isOngoing)
 
   const { currentRace } = useRaceWeekendState()
-  const nextRace = currentRace ?? calendar.find((r) => new Date(r.date) >= now) ?? null
+  const nextRace = ongoingRace ?? currentRace ?? nextUpcoming ?? null
 
   async function loadRound(round) {
     if (selected === round) { setSelected(null); setShowStory(false); return }
     setSelected(round); setShowStory(false)
+
+    const race = calendar.find((r) => r.round === round)
+    const statusInfo = getRaceStatus(race, now)
+    if (statusInfo.isOngoing) {
+      setResults(round, { ongoing: true, raceName: race?.raceName ?? `Round ${round}`, round })
+      return
+    }
+
     if (results[round]) return
     setLoading(round); setError(null)
     try {
@@ -177,15 +187,20 @@ export default function Results() {
           Race Results
         </h1>
         <div className="font-mono text-xs mt-1 text-pitwall-dim">
-          {pastRaces.length} completed rounds
+          {pastRaces.length} completed rounds{ongoingRace ? ` · ${ongoingRace.raceName} in progress` : ''}
         </div>
       </div>
 
-      {/* Upcoming race banner */}
+      {/* Upcoming / Ongoing race banner */}
       {nextRace && (
         <div className="border-b border-pitwall-border px-6 py-2.5 flex items-center gap-4 bg-pitwall-surface-2/80 backdrop-blur-md">
-          <span className="font-display text-[10px] tracking-widest font-bold uppercase text-pitwall-dim">
-            Next GP
+          <span className={`font-display text-[10px] tracking-widest font-bold uppercase ${ongoingRace ? 'text-status-green flex items-center gap-1.5' : 'text-pitwall-dim'}`}>
+            {ongoingRace ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-status-green animate-pulse" />
+                ONGOING GP
+              </>
+            ) : 'Next GP'}
           </span>
           <span className="font-display font-bold text-sm tracking-wider text-pitwall-text-strong flex-1 truncate uppercase flex items-center gap-2">
             <span className="font-mono font-bold text-[10px] bg-pitwall-surface border border-pitwall-border px-1.5 py-0.5 rounded-sm text-status-red">
@@ -196,9 +211,9 @@ export default function Results() {
           <span className="font-mono text-xs text-pitwall-dim flex-shrink-0">
             {nextRace.date}
           </span>
-          <Link to="/"
-            className="font-display font-bold text-[10px] tracking-widest border border-pitwall-border px-3 py-1 bg-pitwall-surface rounded-sm hover:border-status-red/40 hover:text-status-red transition-colors text-pitwall-dim">
-            RACE OVERVIEW
+          <Link to={ongoingRace ? "/live" : "/"}
+            className="font-display font-bold text-[10px] tracking-widest border border-pitwall-border px-3 py-1 bg-pitwall-surface rounded-sm hover:border-status-red/40 hover:text-status-red transition-colors text-pitwall-dim uppercase">
+            {ongoingRace ? "LIVE TIMING" : "RACE OVERVIEW"}
           </Link>
         </div>
       )}
@@ -207,16 +222,20 @@ export default function Results() {
       <div className="border-b border-pitwall-border bg-pitwall-surface">
         <div className="flex gap-0 overflow-x-auto divide-x divide-pitwall-border/40">
           {calendar.map((race) => {
-            const isPast  = new Date(race.date) < now
-            const isSelec = selected === race.round
-            const country = race.Circuit?.Location?.country ?? ''
+            const statusInfo = getRaceStatus(race, now)
+            const isPast     = statusInfo.isDone
+            const isOngoing  = statusInfo.isOngoing
+            const isSelec    = selected === race.round
+            const country    = race.Circuit?.Location?.country ?? ''
+            const isClickable = isPast || isOngoing
+
             return (
               <button
                 key={race.round}
-                onClick={() => isPast && loadRound(race.round)}
-                disabled={!isPast}
+                onClick={() => isClickable && loadRound(race.round)}
+                disabled={!isClickable}
                 className={`flex-shrink-0 px-5 py-3 text-left transition-all min-w-[120px] select-none ${
-                  !isPast ? 'opacity-20 cursor-not-allowed' :
+                  !isClickable ? 'opacity-20 cursor-not-allowed' :
                   isSelec ? 'border-b-2 border-b-status-red' :
                   'hover:bg-pitwall-surface-2 cursor-pointer border-b-2 border-b-transparent'
                 }`}
@@ -224,7 +243,14 @@ export default function Results() {
                   background: isSelec ? 'var(--pw-surface-2)' : 'transparent',
                 }}
               >
-                <div className="font-display text-[9px] font-bold text-pitwall-dim">ROUND {race.round}</div>
+                <div className="flex items-center justify-between">
+                  <span className="font-display text-[9px] font-bold text-pitwall-dim">ROUND {race.round}</span>
+                  {isOngoing && (
+                    <span className="font-mono text-[8px] text-status-green bg-status-green/10 border border-status-green/40 px-1 rounded-sm font-bold">
+                      LIVE
+                    </span>
+                  )}
+                </div>
                 <div className="mt-1 mb-1.5">
                   <span className="font-mono font-bold text-[10px] bg-pitwall-surface-2 border border-pitwall-border px-1.5 py-0.5 rounded-sm text-pitwall-text-strong">
                     {getFlag(country)}
@@ -250,13 +276,34 @@ export default function Results() {
         </div>
       )}
 
+      {selectedData?.ongoing && (
+        <div className="px-6 py-12 flex flex-col items-center justify-center text-center bg-carbon border-b border-pitwall-border">
+          <div className="font-mono text-xs text-status-green tracking-widest uppercase font-bold mb-2 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-status-green animate-ping" />
+            Race Weekend In Progress
+          </div>
+          <div className="font-display font-extrabold text-xl text-pitwall-text-strong uppercase mb-2">
+            {selectedData.raceName}
+          </div>
+          <p className="font-mono text-xs text-pitwall-dim max-w-md mb-6">
+            Official race classification and final podium standings will be posted immediately after the checkered flag. Follow real-time timing on the live pitwall.
+          </p>
+          <Link
+            to="/live"
+            className="font-display font-bold text-xs tracking-widest px-6 py-2.5 bg-status-red text-white rounded-sm hover:brightness-110 active:scale-95 transition-all shadow-md shadow-status-red/20 uppercase"
+          >
+            Open Live Pitwall →
+          </Link>
+        </div>
+      )}
+
       {selectedData?.empty && (
         <div className="px-6 py-8 font-mono text-sm text-pitwall-dim bg-carbon">
           Race not yet run — no results available
         </div>
       )}
 
-      {selectedData && !selectedData.empty && (
+      {selectedData && !selectedData.empty && !selectedData.ongoing && (
         <div className="px-6 py-5 flex flex-col gap-6">
 
           {/* ── Podium ─────────────────────────────────────────── */}

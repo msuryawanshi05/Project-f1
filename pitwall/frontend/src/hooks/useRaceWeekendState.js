@@ -66,22 +66,38 @@ function buildSessions(race) {
 
 /** Match a Jolpica race to a circuits.json entry */
 function matchCircuitData(race) {
-  const rn = (race?.raceName ?? '').toLowerCase().replace(' grand prix', '').trim()
+  if (!race) return null
+  const roundMatch = circuits.find((c) => c.round === Number(race.round))
+  if (roundMatch) return roundMatch
+
+  const cName = (race.Circuit?.circuitName ?? '').toLowerCase()
+  if (cName) {
+    const cMatch = circuits.find((c) => c.circuit?.toLowerCase().includes(cName) || cName.includes(c.circuit?.toLowerCase()))
+    if (cMatch) return cMatch
+  }
+
+  const rn = (race.raceName ?? '').toLowerCase().replace(' grand prix', '').trim()
   return circuits.find((c) => {
     const cn = (c.name ?? '').toLowerCase().replace(' grand prix', '').trim()
-    return cn.includes(rn) || rn.includes(cn)
+    return cn === rn || cn.includes(rn) || rn.includes(cn)
   }) ?? null
 }
 
 export default function useRaceWeekendState() {
-  const session  = useF1Store((s) => s.session)
-  const calendar = useF1Store((s) => s.calendar)
+  const session     = useF1Store((s) => s.session)
+  const calendar    = useF1Store((s) => s.calendar)
+  const raceControl = useF1Store((s) => s.raceControl)
+  const timing      = useF1Store((s) => s.timing)
 
   return useMemo(() => {
     const now = new Date()
 
-    // ── SESSION_LIVE — trust the WebSocket phase or active lap count ────────
-    const isLivePhase = ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase) || Boolean(session.lap && session.lap >= 1)
+    // ── SESSION_LIVE — trust the WebSocket phase, active lap count, or active formation lap ────────
+    const isFormation = raceControl.some((m) => {
+      const t = (m.message || m.msg || '').toUpperCase()
+      return t.includes('FORMATION LAP') || t.includes('START PROCEDURE')
+    })
+    const isLivePhase = isFormation || ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase) || Boolean(session.lap && session.lap >= 1) || (timing.length > 0 && session.phase !== 'PRE')
     if (isLivePhase) {
       let activeRace = null
       for (const race of calendar) {
@@ -188,7 +204,8 @@ export default function useRaceWeekendState() {
 
       // Classify each session
       const withStatus = sessions.map((s) => {
-        const endDt = new Date(s.dt.getTime() + 90 * 60 * 1000) // +90min
+        const durationMinutes = s.key === 'Race' ? 180 : 90
+        const endDt = new Date(s.dt.getTime() + durationMinutes * 60 * 1000)
         return {
           ...s,
           done:    now > endDt,
@@ -197,11 +214,14 @@ export default function useRaceWeekendState() {
         }
       })
 
+      const liveSession = withStatus.find((s) => s.live) ?? null
       const nextSession = withStatus.find((s) => s.upcoming) ?? null
       const lastSession = [...withStatus].reverse().find((s) => s.done) ?? null
       const minsUntilNext = nextSession ? (nextSession.dt - now) / 60000 : Infinity
 
-      const mode = minsUntilNext <= 30
+      const mode = liveSession
+        ? 'SESSION_LIVE'
+        : minsUntilNext <= 30
         ? 'WEEKEND_SESSION_SOON'
         : 'WEEKEND_BETWEEN_SESSIONS'
 

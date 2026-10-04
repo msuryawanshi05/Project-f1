@@ -24,11 +24,28 @@ const BANNER_CONFIG = {
 export default function TrackStatusBanner({ statusCode }) {
   const ts = getTrackStatus(statusCode)
   const raceControl = useF1Store((s) => s.raceControl)
-  if (ts.severity === 'green') return null
+
+  // Check if start procedure or race is suspended/delayed even if track status reports green/clear
+  const recentProcedureMsg = Array.isArray(raceControl) && raceControl.find((m) => {
+    const txt = (m.message ?? '').toUpperCase()
+    return (
+      txt.includes('START PROCEDURE') ||
+      txt.includes('STARTING PROCEDURE') ||
+      txt.includes('START ORDER') ||
+      txt.includes('FORMATION LAP') ||
+      txt.includes('SUSPEND') ||
+      txt.includes('DELAY')
+    )
+  })
+
+  const procTxt = (recentProcedureMsg?.message ?? '').toUpperCase()
+  const isSuspended = procTxt.includes('SUSPEND') || procTxt.includes('DELAY') || procTxt.includes('START ORDER')
+
+  if (ts.severity === 'green' && !isSuspended) return null
 
   // Special keys for different safety car / suspension states
   let configKey = ts.severity
-  if (statusCode === '5') {
+  if (statusCode === '5' || isSuspended) {
     configKey = 'red'
   } else if (statusCode === '6') {
     configKey = 'vsc'
@@ -38,25 +55,34 @@ export default function TrackStatusBanner({ statusCode }) {
 
   const config = BANNER_CONFIG[configKey] ?? BANNER_CONFIG.yellow
 
-  // If Red Flag, look for a resumption message (e.g. "RACE WILL RESUME AT 15:35")
+  // If Red Flag or Suspended, look for a resumption or procedure message
   let bannerLabel = config.label ?? ts.label
-  if (statusCode === '5' && Array.isArray(raceControl)) {
+  if (isSuspended && recentProcedureMsg?.message) {
+    bannerLabel = recentProcedureMsg.message.toUpperCase()
+  } else if (statusCode === '5' && Array.isArray(raceControl)) {
     const resumeMsg = raceControl.find((m) => {
       const txt = (m.message ?? '').toUpperCase()
-      return txt.includes('RESUME') || txt.includes('RESTART')
+      return txt.includes('RESUME') || txt.includes('RESTART') || txt.includes('SUSPEND') || txt.includes('START ORDER')
     })
     if (resumeMsg?.message) {
-      bannerLabel = `RED FLAG — ${resumeMsg.message}`
+      bannerLabel = `RED FLAG — ${resumeMsg.message.toUpperCase()}`
     }
   } else if (statusCode === '4' && Array.isArray(raceControl)) {
     const scInMsg = raceControl.find((m) => {
       const txt = (m.message ?? '').toUpperCase()
       return txt.includes('SAFETY CAR IN THIS LAP') || txt.includes('SC IN THIS LAP')
     })
+    const formationMsg = raceControl.find((m) => {
+      const txt = (m.message ?? '').toUpperCase()
+      return txt.includes('FORMATION LAP')
+    })
     if (scInMsg?.message) {
       bannerLabel = 'SAFETY CAR IN THIS LAP — PREPARE FOR RESTART'
+    } else if (formationMsg?.message) {
+      bannerLabel = formationMsg.message.toUpperCase()
     }
   }
+
 
   return (
     <div className={`${config.cls} w-full py-1.5 px-4 flex items-center justify-center gap-2 transition-all duration-300`}>

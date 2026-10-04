@@ -13,7 +13,7 @@ import useRaceWeekendState from '../hooks/useRaceWeekendState'
 import TrackMap from '../components/ui/TrackMap'
 import RaceModal from '../components/ui/RaceModal'
 import circuits from '../data/circuits.json'
-import { getCountryAbbreviation, formatCountdown, getSafeTeamColour } from '../utils/driverUtils'
+import { getCountryAbbreviation, formatCountdown, getSafeTeamColour, getRaceStatus } from '../utils/driverUtils'
 import { useTilt } from '../hooks/useTilt'
 import { AnimatedNumber } from '../components/ui/AnimatedNumber'
 import { PageReveal, RevealItem } from '../components/layout/PageReveal'
@@ -148,7 +148,9 @@ function RaceCard({ race, onOpen }) {
     race.raceName?.toLowerCase().includes(c.name?.toLowerCase().replace(' grand prix', '').trim())
   )
   const flag   = getCountryAbbreviation(race.Circuit?.Location?.country)
-  const isPast = new Date(race.date) < new Date()
+  const statusInfo = getRaceStatus(race)
+  const isPast = statusInfo.isDone
+  const isOngoing = statusInfo.isOngoing
 
   const { ref, rotateX, rotateY, onMouseMove, onMouseLeave } = useTilt(5)
 
@@ -162,10 +164,11 @@ function RaceCard({ race, onOpen }) {
       whileHover={isPast ? {} : { scale: 1.02 }}
       whileTap={isPast ? {} : { scale: 0.98 }}
       className={`w-full text-left border border-pitwall-border p-3 flex items-center gap-3 transition-all ${
+        isOngoing ? 'border-status-green/60 bg-status-green/10 hover:border-status-green hover:bg-status-green/15 cursor-pointer group' :
         isPast ? 'opacity-50 cursor-default' : 'hover:border-status-red/70 hover:bg-pitwall-surface-2 cursor-pointer group'
       }`}
       style={{
-        background: 'var(--pw-surface)',
+        background: isOngoing ? 'rgba(0, 166, 81, 0.08)' : 'var(--pw-surface)',
         rotateX,
         rotateY,
         transformPerspective: 600,
@@ -237,9 +240,11 @@ export default function Home() {
   const isActiveWeekend = ['WEEKEND_BETWEEN_SESSIONS', 'WEEKEND_SESSION_SOON'].includes(mode)
 
   const now         = new Date()
-  const pastRaces   = calendar.filter((r) => new Date(r.date) < now)
-  const futureRaces = calendar.filter((r) => new Date(r.date) >= now)
-  const nextRace    = currentRace ?? futureRaces[0] ?? null
+  const pastRaces   = calendar.filter((r) => getRaceStatus(r, now).isDone)
+  const ongoingRace = calendar.find((r) => getRaceStatus(r, now).isOngoing)
+  const upcomingRaces = calendar.filter((r) => !getRaceStatus(r, now).isDone && !getRaceStatus(r, now).isOngoing)
+  const nextRace    = ongoingRace ?? currentRace ?? upcomingRaces[0] ?? null
+  const futureRaces = [ongoingRace, ...upcomingRaces].filter(Boolean)
 
   const countdownTarget = nextSession?.targetDt ?? (nextRace ? new Date(`${nextRace.date}T${nextRace.time ?? '13:00:00Z'}`) : null)
   const countdownSeconds = useCountdownSeconds(countdownTarget)

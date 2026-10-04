@@ -24,7 +24,7 @@ import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from db import cache_get_all, cache_set, init_db
+from db import cache_get_all, cache_prune_expired, cache_set, init_db
 from scheduler import start_scheduler
 from signalr_client import get_client
 
@@ -77,7 +77,8 @@ async def broadcaster():
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
-    logger.info("DB initialised")
+    await cache_prune_expired()
+    logger.info("DB initialised and pruned")
 
     # Start broadcaster — store in set to prevent premature GC
     task = asyncio.create_task(broadcaster())
@@ -119,64 +120,74 @@ async def health_check():
 @app.get("/api/current-session")
 async def current_session():
     """
-    Resolve the current or most-recent OpenF1 session_key.
+    Resolve the current or most-recent session from Jolpica (Ergast mirror).
 
-    Fetches the sessions list for the current year, finds the session
-    whose date matches today (or the most recently started session),
-    and returns its session_key so the frontend can use it for
-    OpenF1 car_data and radio API calls.
+    OpenF1 now requires paid subscription for all data — we use Jolpica instead.
+    Jolpica provides race weekend dates and session times for free.
 
-    Returns: { session_key, session_name, circuit, year }
-    If OpenF1 is unavailable or returns 401, returns { session_key: None, source: "unavailable" }
+    Returns: { session_key, session_name, circuit, year, round }
+    session_key is the Jolpica round number (used as a fallback identifier).
     """
     today = date.today()
     year  = today.year
+    today_str = today.isoformat()
 
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             resp = await client.get(
-                "https://api.openf1.org/v1/sessions",
-                params={"year": year},
+                f"https://api.jolpi.ca/ergast/f1/{year}.json",
             )
-            if resp.status_code == 401:
-                logger.warning(
-                    "OpenF1 returned 401 — this is unexpected for historical data. "
-                    "Note: real-time data requires paid subscription; we use SignalR for live data."
-                )
-                return {"session_key": None, "source": "auth_error"}
             resp.raise_for_status()
-            sessions = resp.json()
-        except httpx.HTTPStatusError as exc:
-            logger.warning("OpenF1 session fetch failed: %s", exc)
-            return {"session_key": None, "source": "http_error", "error": str(exc)}
+            data = resp.json()
         except Exception as exc:
-            logger.warning("OpenF1 session fetch failed: %s", exc)
+            logger.warning("Jolpica session fetch failed: %s", exc)
             return {"session_key": None, "source": "error", "error": str(exc)}
 
-    if not sessions:
-        return {"session_key": None, "source": "no_sessions", "error": "no sessions found"}
+    races = data.get("MRData", {}).get("RaceTable", {}).get("Races", [])
+    if not races:
+        return {"session_key": None, "source": "no_sessions"}
 
-    # Find best match: prefer a session whose date_start <= today <= date_end
-    today_str = today.isoformat()
+    # Find the current or most recent race weekend
     matched = None
-    for s in sessions:
-        start = (s.get("date_start") or "")[:10]
-        end   = (s.get("date_end")   or s.get("date_start") or "")[:10]
-        if start <= today_str <= end:
-            matched = s
-            break  # take the first matching (earliest on the day)
+    for race in races:
+        race_date = (race.get("date") or "")[:10]
+        # Check FP1 date as the weekend start
+        fp1_date = (race.get("FirstPractice", {}).get("date") or race_date)[:10]
+        if fp1_date <= today_str <= race_date:
+            matched = race
+            break
 
-    # Fall back to the most recent past session
+    # Fall back to most recent past race
     if not matched:
-        past = [s for s in sessions if (s.get("date_start") or "")[:10] <= today_str]
-        matched = past[-1] if past else sessions[-1]
+        past = [r for r in races if (r.get("date") or "")[:10] <= today_str]
+        matched = past[-1] if past else races[-1]
+
+    round_num = matched.get("round", "0")
+    circuit   = matched.get("Circuit", {})
+
+    # Determine which session is current/most recent
+    session_map = [
+        ("SprintQualifying", matched.get("SprintQualifying", {})),
+        ("Sprint",           matched.get("Sprint", {})),
+        ("Qualifying",       matched.get("Qualifying", {})),
+        ("Race",             {"date": matched.get("date"), "time": matched.get("time")}),
+    ]
+    current_session_name = "Race"
+    for label, sess in reversed(session_map):
+        sess_date = (sess.get("date") or "")[:10]
+        if sess_date and sess_date <= today_str:
+            current_session_name = label
+            break
 
     return {
-        "session_key":  matched.get("session_key"),
-        "session_name": matched.get("session_name"),
-        "circuit":      matched.get("circuit_short_name"),
-        "year":         matched.get("year"),
-        "source":       "openf1",
+        "session_key":  int(round_num),   # use round as stable session identifier
+        "session_name": current_session_name,
+        "circuit":      circuit.get("circuitId"),
+        "circuit_name": circuit.get("circuitName"),
+        "year":         int(year),
+        "round":        int(round_num),
+        "race_name":    matched.get("raceName"),
+        "source":       "jolpica",
     }
 
 
@@ -184,20 +195,12 @@ async def current_session():
 @app.get("/api/openf1/status")
 async def openf1_status():
     """
-    Checks OpenF1 reachability.
-    Historical data (2023+) is FREE with no authentication.
-    Real-time data requires a paid subscription — not used here.
-    Live timing comes from the F1 SignalR feed instead.
+    OpenF1 now requires paid subscription — returns unavailable.
+    Historical and real-time data both require auth as of mid-2026.
+    Live timing comes from F1 SignalR feed (free, no auth).
+    Historical data falls back to Jolpica/Ergast (free, no auth).
     """
-    async with httpx.AsyncClient(timeout=5) as client:
-        try:
-            resp = await client.get(
-                "https://api.openf1.org/v1/sessions",
-                params={"year": 2025, "limit": 1},
-            )
-            return {"reachable": resp.status_code == 200, "note": "historical_free_no_auth"}
-        except Exception:
-            return {"reachable": False}
+    return {"reachable": False, "note": "openf1_requires_subscription_since_2026"}
 
 
 @app.get("/api/openf1/{path:path}")
@@ -240,19 +243,32 @@ async def websocket_endpoint(ws: WebSocket):
     logger.info("WS connected: %s (total: %d)", client_host, len(connected_clients))
 
     try:
-        # Send all currently cached data so a fresh page load isn't blank
+        # Send all currently valid cached data so a fresh page load has latest telemetry
         cached = await cache_get_all()
         if cached:
             for envelope in cached.values():
                 await ws.send_text(json.dumps(envelope))
             logger.info("Sent %d cached messages to %s", len(cached), client_host)
-        else:
-            # No session active — send PRE state
+
+        # If no active session state is cached, send explicit PRE state so client knows session isn't live
+        if "session" not in cached:
             await ws.send_text(json.dumps({
                 "type": "session",
                 "timestamp": "",
                 "data": {"name": "", "status": "", "lap": None,
                          "total_laps": None, "clock": "", "phase": "PRE"},
+            }))
+        if "timing" not in cached:
+            await ws.send_text(json.dumps({
+                "type": "timing",
+                "timestamp": "",
+                "data": {"drivers": []},
+            }))
+        if "tyres" not in cached:
+            await ws.send_text(json.dumps({
+                "type": "tyres",
+                "timestamp": "",
+                "data": {"drivers": []},
             }))
 
         # Keep connection alive — wait for client messages (pong etc.)

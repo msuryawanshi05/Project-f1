@@ -1,15 +1,18 @@
 <div align="center">
 
 # 🏎️ PITWALL — Real-Time F1 Timing & Telemetry Dashboard
+
 ### High-performance Formula 1 session timing, interactive telemetry, and live track maps
 
 <!-- BADGE ROW 1 — Context & Status -->
+
 [![Domain](https://img.shields.io/badge/Domain-Automotive%20%26%20Sports%20Analytics-orange?style=for-the-badge)](#)
 [![Built For](https://img.shields.io/badge/Built%20For-Personal%20Project-blue?style=for-the-badge)](#)
 [![Result](https://img.shields.io/badge/🏆%20Result-Real--Time%20Telemetry%20Engine-silver?style=for-the-badge)](#)
 [![Status](https://img.shields.io/badge/Status-Active%20Development-green?style=for-the-badge)](#)
 
 <!-- BADGE ROW 2 — Actual Tech Stack -->
+
 ![React](https://img.shields.io/badge/React_18-61DAFB?style=flat&logo=react&logoColor=black)
 ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
@@ -91,7 +94,7 @@ cd pitwall/backend
 python -m venv venv
 # Windows: venv\Scripts\activate | Unix: source venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8000
 
 # 3. Run the Frontend (React + Vite)
 cd ../frontend

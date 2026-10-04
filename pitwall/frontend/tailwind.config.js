@@ -9,26 +9,28 @@ export default {
     extend: {
       colors: {
         pitwall: {
-          bg:      '#0A0A0A',
-          surface: '#111111',
-          border:  '#222222',
-          muted:   '#333333',
-          text:    '#E5E5E5',
-          dim:     '#888888',
-          ghost:   '#444444',
+          bg:          'var(--pw-bg)',
+          surface:     'var(--pw-surface)',
+          'surface-2': 'var(--pw-surface-2)',
+          border:      'var(--pw-border)',
+          muted:       'var(--pw-muted)',
+          text:        'var(--pw-text)',
+          dim:         'var(--pw-dim)',
+          ghost:       'var(--pw-ghost)',
+          'text-strong': 'var(--pw-text-strong)',
         },
         sector: {
-          purple: '#B468FF',
-          green:  '#00D2BE',
-          yellow: '#FFF200',
-          white:  '#FFFFFF',
+          purple: 'var(--pw-purple)',
+          green:  'var(--pw-green)',
+          yellow: 'var(--pw-yellow)',
+          white:  'var(--pw-text-strong)',
         },
         status: {
-          green:  '#00A651',
-          yellow: '#FFF200',
-          red:    '#E8002D',
+          green:  'var(--pw-green)',
+          yellow: 'var(--pw-yellow)',
+          red:    'var(--pw-red)',
           sc:     '#FFA500',
-          vsc:    '#FFD700',
+          vsc:    'var(--pw-yellow)',
         },
         popup: {
           critical: '#E8002D',
@@ -41,7 +43,8 @@ export default {
       },
       fontFamily: {
         mono:    ['JetBrains Mono', 'Fira Code', 'monospace'],
-        display: ['Barlow Condensed', 'Arial Narrow', 'sans-serif'],
+        display: ['Rajdhani', 'Barlow Condensed', 'sans-serif'],
+        digital: ['Orbitron', 'JetBrains Mono', 'monospace'],
         body:    ['Inter', 'system-ui', 'sans-serif'],
       },
       fontSize: {

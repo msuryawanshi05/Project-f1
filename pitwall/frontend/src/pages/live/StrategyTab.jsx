@@ -339,6 +339,20 @@ export default function StrategyTab() {
   }, [pitStops])
 
   const hasTyres = Object.keys(stintsByDriver).length > 0
+  const isSessionActive = session.phase !== 'PRE' && ['LIVE', 'RACE'].includes(session.phase) && sortedTimings.length > 0
+
+  if (!isSessionActive) {
+    return (
+      <div className="flex items-center justify-center min-h-[calc(100vh-200px)] bg-pitwall-bg w-full px-6">
+        <EmptyState
+          icon="⏱️"
+          title="Strategy Feed Standby"
+          message="Tyre stint lifecycles, compound degradation, and pit stop analysis will activate when the race starts."
+          className="w-full max-w-lg my-0"
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 bg-pitwall-bg">

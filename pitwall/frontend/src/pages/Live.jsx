@@ -13,6 +13,8 @@ import { getTeamColour, formatCountdown, formatSessionTime, parseGapToSeconds } 
 import StrategyTab from './live/StrategyTab'
 import TelemetryTab from './live/TelemetryTab'
 import RadioTab from './live/RadioTab'
+import { useQualifyingGrid } from '../hooks/useQualifyingGrid'
+import QualifyingGridTower from '../components/ui/QualifyingGridTower'
 
 // ── Countdown inline ──────────────────────────────────────────────────────────
 function useCountdownSeconds(targetDt) {
@@ -261,6 +263,7 @@ export default function Live() {
   const [activeTab, setActiveTab]           = useState('TOWER')
   const [expandedDriver, setExpandedDriver] = useState(null)
   const [showSidebar, setShowSidebar]       = useState(true)
+  const [preRaceView, setPreRaceView]       = useState('GRID') // 'GRID' | 'COUNTDOWN'
 
   // Expose setActiveTab to window so keyboard shortcuts can switch tabs
   useEffect(() => {
@@ -282,6 +285,8 @@ export default function Live() {
 
   const weekendState = useRaceWeekendState()
   const isLive = weekendState.mode === 'SESSION_LIVE'
+  const currentRound = weekendState.currentRace?.round
+  const { grid: qualifyingGrid, raceInfo: qualiRaceInfo, loading: qualiLoading } = useQualifyingGrid(currentRound)
 
   // OpenF1 stints — NOTE: OpenF1 now requires paid subscription (returns 401).
   // Stints data during live sessions comes from the SignalR tyre feed instead.
@@ -426,19 +431,40 @@ export default function Live() {
     pit: 'w-[5%] min-w-[22px] text-center',
   }
 
-  const currentLap = session.lap ?? sortedTiming[0]?.lap ?? (sortedTiming.length > 0 ? 1 : null)
-  const totalLaps = session.total_laps ?? weekendState.circuitData?.laps ?? 53
-  const isSessionActive = isLive || session.phase === 'LIVE' || session.phase === 'RACE' || sortedTiming.length > 0
+  const recentProcedureMsg = raceControl.find((m) => {
+    const txt = (m.message || m.msg || '').toUpperCase()
+    return (
+      txt.includes('FORMATION LAP') ||
+      txt.includes('START PROCEDURE') ||
+      txt.includes('STARTING PROCEDURE') ||
+      txt.includes('START ORDER') ||
+      txt.includes('RACE START')
+    )
+  })
 
-  const sessionHeaderTitle = isSessionActive
+  const procTxt = (recentProcedureMsg?.message || recentProcedureMsg?.msg || '').toUpperCase()
+  const isSuspended = procTxt.includes('SUSPEND') || procTxt.includes('DELAY')
+  const isFormationLap = !isSuspended && (procTxt.includes('FORMATION LAP') || procTxt.includes('BEHIND SAFETY CAR'))
+  const isSessionActive = isSuspended || isFormationLap || ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase) || (session.phase !== 'PRE' && (isLive || sortedTiming.length > 0)) || (sortedTiming.length > 0 && (isLive || isFormationLap || isSuspended))
+
+  const sessionHeaderTitle = isSuspended
+    ? 'START PROCEDURE SUSPENDED'
+    : isFormationLap
+    ? 'FORMATION LAP'
+    : isSessionActive
     ? (session.name ? session.name.toUpperCase() : 'RACE')
     : weekendState.currentRace?.raceName ?? 'NO SESSION'
 
-  const sessionHeaderRight = isSessionActive
+  const sessionHeaderRight = isSuspended
+    ? (raceControl[0]?.message?.toUpperCase()?.includes('START ORDER') ? 'ORIGINAL GRID' : 'START SUSPENDED')
+    : isFormationLap
+    ? 'BEHIND SAFETY CAR'
+    : isSessionActive
     ? `LAP ${currentLap ?? '—'} / ${totalLaps ?? '—'}`
-    : weekendState.mode === 'WEEKEND_BETWEEN_SESSIONS' || weekendState.mode === 'WEEKEND_SESSION_SOON'
+    : weekendState.mode === 'WEEKEND_BETWEEN_SESSIONS' || weekendState.mode === 'WEEKEND_SESSION_SOON' || weekendState.mode === 'SESSION_LIVE'
     ? `LAP 0 / ${totalLaps ?? '—'}`
     : weekendState.nextSession?.label ?? 'UPCOMING'
+
 
   return (
     <div className="h-full flex flex-col" style={{ background: 'var(--pw-bg)' }}>
@@ -507,11 +533,44 @@ export default function Live() {
             {/* Session header */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-pitwall-border"
               style={{ background: 'var(--pw-surface)' }}>
-              <span className="font-display font-semibold text-sm tracking-wider uppercase"
-                style={{ color: 'var(--pw-text)' }}>
-                {sessionHeaderTitle}
-              </span>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="font-display font-semibold text-sm tracking-wider uppercase"
+                  style={{ color: 'var(--pw-text)' }}>
+                  {!isSessionActive && qualifyingGrid.length > 0 && preRaceView === 'GRID'
+                    ? 'PROVISIONAL STARTING GRID'
+                    : sessionHeaderTitle}
+                </span>
+                {isFormationLap ? (
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40 animate-pulse">
+                    FORMATION LAP
+                  </span>
+                ) : !isSessionActive && qualifyingGrid.length > 0 ? (
+                  <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-status-green/15 text-status-green border border-status-green/30">
+                    QUALI COMPLETE
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-2.5">
+                {!isSessionActive && qualifyingGrid.length > 0 && (
+                  <div className="flex items-center bg-pitwall-surface-2 p-0.5 rounded border border-pitwall-border">
+                    <button
+                      onClick={() => setPreRaceView('GRID')}
+                      className={`px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider rounded transition-colors ${
+                        preRaceView === 'GRID' ? 'bg-pitwall-muted/80 text-pitwall-text-strong font-bold shadow-sm' : 'text-pitwall-ghost hover:text-pitwall-text-strong'
+                      }`}
+                    >
+                      🏁 GRID ({qualifyingGrid.length})
+                    </button>
+                    <button
+                      onClick={() => setPreRaceView('COUNTDOWN')}
+                      className={`px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider rounded transition-colors ${
+                        preRaceView === 'COUNTDOWN' ? 'bg-pitwall-muted/80 text-pitwall-text-strong font-bold shadow-sm' : 'text-pitwall-ghost hover:text-pitwall-text-strong'
+                      }`}
+                    >
+                      ⏱️ COUNTDOWN
+                    </button>
+                  </div>
+                )}
                 <button
                   onClick={() => setShowSidebar(!showSidebar)}
                   className="font-display text-[9px] tracking-widest px-2.5 py-1 border border-pitwall-border hover:border-pitwall-muted text-pitwall-ghost hover:text-pitwall-dim rounded-sm transition-all uppercase font-bold bg-white/5 active:scale-95 select-none"
@@ -528,8 +587,8 @@ export default function Live() {
             {/* Timing table container — synchronized horizontal and vertical scroll */}
             <div className="flex-1 flex flex-col overflow-y-auto overflow-x-auto">
               <div className="min-w-[480px] w-full flex flex-col flex-1">
-                {/* Column headers */}
-                {(isLive || sortedTiming.length > 0) && (
+                {/* Column headers for active live race */}
+                {isSessionActive && sortedTiming.length > 0 && (
                   <div className="sticky top-0 z-10 w-full bg-pitwall-surface-2 border-b border-pitwall-border px-4 transition-all duration-300">
                     <div className="flex items-center h-7 px-0 w-full">
                       <div className="w-[3px]" />
@@ -546,10 +605,12 @@ export default function Live() {
                   </div>
                 )}
 
-                {/* Driver rows / skeleton / smart empty state */}
-                <div className="px-4 py-1.5 flex-1">
-                  {sortedTiming.length === 0 ? (
-                    isLive ? (
+                {/* Driver rows / starting grid / skeleton / smart empty state */}
+                <div className={`flex-1 ${(!isSessionActive && preRaceView === 'GRID' && qualifyingGrid.length > 0) ? 'px-0 py-0' : 'px-4 py-1.5'}`}>
+                  {(!isSessionActive || sortedTiming.length === 0) ? (
+                    qualifyingGrid.length > 0 && preRaceView === 'GRID' ? (
+                      <QualifyingGridTower grid={qualifyingGrid} raceInfo={qualiRaceInfo} loading={qualiLoading} />
+                    ) : isLive && !qualifyingGrid.length ? (
                       <div>
                         {Array.from({ length: 20 }).map((_, i) => <SkeletonDriverRow key={i} />)}
                       </div>

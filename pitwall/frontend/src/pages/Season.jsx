@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
 import circuits from '../data/circuits.json'
 import CircuitDetailPanel from '../components/season/CircuitDetailPanel'
-import { getCountryAbbreviation } from '../utils/driverUtils'
+import { getCountryAbbreviation, getRaceStatus } from '../utils/driverUtils'
 import { MiniPodiumPreview } from '../components/ui/Tooltip'
 
 function matchCircuit(race) {
@@ -57,8 +57,13 @@ export default function Season() {
           const circuitData = matchCircuit(race)
           const country     = race.Circuit?.Location?.country ?? ''
           const flag        = getCountryAbbreviation(country)
-          const isPast      = new Date(race.date) < now
-          const isNext      = !isPast && calendar.filter((r) => new Date(r.date) >= now)[0]?.round === race.round
+          const statusInfo  = getRaceStatus(race, now)
+          const isPast      = statusInfo.isDone
+          const isOngoing   = statusInfo.isOngoing
+          const isNext      = !isPast && !isOngoing && calendar.find((r) => {
+            const s = getRaceStatus(r, now)
+            return !s.isDone && !s.isOngoing
+          })?.round === race.round
           const isSelected  = selectedRace?.round === race.round
           const resultsData = results[race.round]
 
@@ -75,11 +80,16 @@ export default function Season() {
               onClick={() => selectRace(race)}
               className={`flex items-center gap-4 px-6 py-3 transition-colors cursor-pointer select-none ${
                 isSelected     ? 'bg-pitwall-surface-2' :
+                isOngoing      ? 'bg-status-green/10 hover:bg-status-green/15' :
                 isPast         ? 'opacity-60 hover:bg-pitwall-surface/30' :
                 isNext         ? 'bg-pitwall-surface hover:bg-pitwall-surface-2/80' :
                                  'hover:bg-pitwall-surface/50'
               }`}
-              style={isNext ? { borderLeft: '3px solid var(--pw-red)' } : { borderLeft: `3px solid ${isSelected ? 'var(--pw-red)' : 'transparent'}` }}
+              style={
+                isOngoing ? { borderLeft: '3px solid var(--pw-green)' } :
+                isNext ? { borderLeft: '3px solid var(--pw-red)' } :
+                { borderLeft: `3px solid ${isSelected ? 'var(--pw-red)' : 'transparent'}` }
+              }
             >
             {/* Round */}
             <div className="w-8 flex-shrink-0 font-mono text-xs text-pitwall-dim text-right">
@@ -114,6 +124,12 @@ export default function Season() {
             </div>
 
             {/* Status */}
+            {isOngoing && (
+              <div className="flex-shrink-0 font-mono text-[10px] text-status-green border border-status-green/60 bg-status-green/15 px-2 py-0.5 font-bold tracking-wider animate-pulse flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-status-green inline-block" />
+                ONGOING
+              </div>
+            )}
             {isPast && (
               <MiniPodiumPreview round={race.round}>
                 <div className="flex-shrink-0 font-mono text-[10px] text-pitwall-dim border border-pitwall-border px-1.5 py-0.5 hover:text-white hover:border-white transition-colors cursor-help">

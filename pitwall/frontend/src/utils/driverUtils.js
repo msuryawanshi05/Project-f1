@@ -350,3 +350,53 @@ export function resolveDriver(driverNumber, liveDrivers = []) {
     team,
   }
 }
+
+/**
+ * Determine a race's state relative to current time.
+ * Returns: { status: 'DONE' | 'ONGOING' | 'UPCOMING', isDone, isOngoing, isUpcoming, isLive, raceStart, raceEnd }
+ */
+export function getRaceStatus(race, now = new Date()) {
+  if (!race?.date) {
+    return { status: 'UPCOMING', isDone: false, isOngoing: false, isUpcoming: true, isLive: false }
+  }
+
+  const raceTime = race.time ?? '14:00:00Z'
+  const timeStr = raceTime.endsWith('Z') || raceTime.includes('+') ? raceTime : `${raceTime}Z`
+  const raceStart = new Date(`${race.date}T${timeStr}`)
+  // Allow up to 6 hours after scheduled start or until end of the UTC race day
+  const raceEnd = new Date(Math.max(
+    raceStart.getTime() + 6 * 60 * 60 * 1000,
+    new Date(`${race.date}T23:59:59Z`).getTime()
+  ))
+
+  // Race weekend window starts at FP1 or 3 days before race
+  let weekendStart
+  if (race.FirstPractice?.date) {
+    const fpTime = race.FirstPractice.time ?? '10:00:00Z'
+    const fpStr = fpTime.endsWith('Z') || fpTime.includes('+') ? fpTime : `${fpTime}Z`
+    weekendStart = new Date(`${race.FirstPractice.date}T${fpStr}`)
+  } else {
+    weekendStart = new Date(raceStart.getTime() - 3 * 86400000)
+  }
+
+  const nowMs = now.getTime()
+  const todayStr = now.toISOString().slice(0, 10)
+
+  // On the actual race day, the race weekend is active and ONGOING
+  if (race.date === todayStr) {
+    const isLive = nowMs >= raceStart.getTime()
+    return { status: 'ONGOING', isDone: false, isOngoing: true, isUpcoming: nowMs < raceStart.getTime(), isLive, raceStart, raceEnd }
+  }
+
+  if (nowMs > raceEnd.getTime()) {
+    return { status: 'DONE', isDone: true, isOngoing: false, isUpcoming: false, isLive: false, raceStart, raceEnd }
+  }
+
+  if (nowMs >= weekendStart.getTime() && nowMs <= raceEnd.getTime()) {
+    const isLive = nowMs >= raceStart.getTime() && nowMs <= raceEnd.getTime()
+    return { status: 'ONGOING', isDone: false, isOngoing: true, isUpcoming: false, isLive, raceStart, raceEnd }
+  }
+
+  return { status: 'UPCOMING', isDone: false, isOngoing: false, isUpcoming: true, isLive: false, raceStart, raceEnd }
+}
+

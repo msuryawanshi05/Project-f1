@@ -1,0 +1,43 @@
+{
+  "name": "PITWALL — F1 Live Dashboard",
+  "short_name": "PITWALL",
+  "description": "Live F1 timing, tyre strategy, team radio and race control — your pit wall on a second screen. Free, no subscription needed.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0A0A",
+  "theme_color": "#E8002D",
+  "orientation": "landscape-primary",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Live Dashboard",
+      "url": "/live",
+      "description": "Open live timing tower"
+    },
+    {
+      "name": "Standings",
+      "url": "/standings",
+      "description": "Championship standings"
+    },
+    {
+      "name": "Results",
+      "url": "/results",
+      "description": "Race results archive"
+    }
+  ],
+  "screenshots": [],
+  "categories": ["sports", "utilities"]
+}

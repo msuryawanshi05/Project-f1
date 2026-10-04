@@ -197,20 +197,20 @@ export default function TelemetryTab() {
     }
   }
 
-  if (drivers.length === 0) {
+  const isLive = session.phase !== 'PRE' && ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
+
+  if (!isLive || drivers.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-200px)] bg-pitwall-bg w-full px-6">
         <EmptyState
           icon="📊"
-          title="Telemetry Feed Offline"
-          message="Telemetry streams activate 5 minutes before the session starts."
+          title="Telemetry Feed Standby"
+          message="High-frequency cockpit speed, RPM, throttle, and brake telemetry activate when cars take to the track."
           className="w-full max-w-lg my-0"
         />
       </div>
     )
   }
-
-  const isLive = ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-pitwall-bg">
