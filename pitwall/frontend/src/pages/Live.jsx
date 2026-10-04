@@ -431,22 +431,26 @@ export default function Live() {
     pit: 'w-[5%] min-w-[22px] text-center',
   }
 
-  const recentProcedureMsg = raceControl.find((m) => {
-    const txt = (m.message || m.msg || '').toUpperCase()
-    return (
-      txt.includes('FORMATION LAP') ||
-      txt.includes('START PROCEDURE') ||
-      txt.includes('STARTING PROCEDURE') ||
-      txt.includes('START ORDER') ||
-      txt.includes('RACE START')
-    )
-  })
-
-  const procTxt = (recentProcedureMsg?.message || recentProcedureMsg?.msg || '').toUpperCase()
-  const isSuspended = procTxt.includes('SUSPEND') || procTxt.includes('DELAY')
-  const isFormationLap = !isSuspended && (procTxt.includes('FORMATION LAP') || procTxt.includes('BEHIND SAFETY CAR'))
   const currentLap = session.lap ?? sortedTiming[0]?.lap ?? (sortedTiming.length > 0 ? 1 : null)
   const totalLaps = session.total_laps ?? weekendState.circuitData?.laps ?? 56
+  const isRaceStarted = Boolean(currentLap && currentLap >= 1)
+
+  const recentProcedureMsg = !isRaceStarted && raceControl.length > 0
+    ? raceControl.find((m) => {
+        const txt = (m.message || m.msg || '').toUpperCase()
+        return (
+          txt.includes('FORMATION LAP') ||
+          txt.includes('START PROCEDURE') ||
+          txt.includes('STARTING PROCEDURE') ||
+          txt.includes('START ORDER') ||
+          txt.includes('RACE START')
+        )
+      })
+    : null
+
+  const procTxt = (recentProcedureMsg?.message || recentProcedureMsg?.msg || '').toUpperCase()
+  const isSuspended = !isRaceStarted && (procTxt.includes('SUSPEND') || procTxt.includes('DELAY'))
+  const isFormationLap = !isRaceStarted && !isSuspended && (procTxt.includes('FORMATION LAP') || procTxt.includes('BEHIND SAFETY CAR'))
   const isSessionActive = isSuspended || isFormationLap || ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase) || (session.phase !== 'PRE' && (isLive || sortedTiming.length > 0)) || (sortedTiming.length > 0 && (isLive || isFormationLap || isSuspended))
 
 

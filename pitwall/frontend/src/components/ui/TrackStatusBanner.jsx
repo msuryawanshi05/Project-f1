@@ -24,28 +24,29 @@ const BANNER_CONFIG = {
 export default function TrackStatusBanner({ statusCode }) {
   const ts = getTrackStatus(statusCode)
   const raceControl = useF1Store((s) => s.raceControl)
+  const session = useF1Store((s) => s.session)
+  const timing = useF1Store((s) => s.timing)
 
-  // Check if start procedure or race is suspended/delayed even if track status reports green/clear
-  const recentProcedureMsg = Array.isArray(raceControl) && raceControl.find((m) => {
-    const txt = (m.message ?? '').toUpperCase()
-    return (
-      txt.includes('START PROCEDURE') ||
-      txt.includes('STARTING PROCEDURE') ||
-      txt.includes('START ORDER') ||
-      txt.includes('FORMATION LAP') ||
-      txt.includes('SUSPEND') ||
-      txt.includes('DELAY')
-    )
-  })
+  const currentLap = session?.lap ?? timing?.[0]?.lap ?? (timing?.length > 0 ? 1 : null)
+  const isRaceStarted = Boolean(currentLap && currentLap >= 1)
 
-  const procTxt = (recentProcedureMsg?.message ?? '').toUpperCase()
-  const isSuspended = procTxt.includes('SUSPEND') || procTxt.includes('DELAY') || procTxt.includes('START ORDER')
+  // Check if start procedure is suspended/delayed BEFORE the race starts
+  const latestMsg = Array.isArray(raceControl) && raceControl.length > 0 ? raceControl[0] : null
+  const latestTxt = (latestMsg?.message ?? '').toUpperCase()
 
-  if (ts.severity === 'green' && !isSuspended) return null
+  const isPreRaceSuspended = !isRaceStarted && (
+    latestTxt.includes('START PROCEDURE SUSPENDED') ||
+    latestTxt.includes('STARTING PROCEDURE SUSPENDED') ||
+    latestTxt.includes('DELAYED START') ||
+    latestTxt.includes('START DELAYED')
+  )
+
+  // If track is green/clear and not suspended pre-race, show nothing
+  if (ts.severity === 'green' && !isPreRaceSuspended) return null
 
   // Special keys for different safety car / suspension states
   let configKey = ts.severity
-  if (statusCode === '5' || isSuspended) {
+  if (statusCode === '5' || isPreRaceSuspended) {
     configKey = 'red'
   } else if (statusCode === '6') {
     configKey = 'vsc'
@@ -55,31 +56,24 @@ export default function TrackStatusBanner({ statusCode }) {
 
   const config = BANNER_CONFIG[configKey] ?? BANNER_CONFIG.yellow
 
-  // If Red Flag or Suspended, look for a resumption or procedure message
   let bannerLabel = config.label ?? ts.label
-  if (isSuspended && recentProcedureMsg?.message) {
-    bannerLabel = recentProcedureMsg.message.toUpperCase()
+  if (isPreRaceSuspended && latestMsg?.message) {
+    bannerLabel = latestMsg.message.toUpperCase()
   } else if (statusCode === '5' && Array.isArray(raceControl)) {
-    const resumeMsg = raceControl.find((m) => {
+    const resumeMsg = raceControl.slice(0, 5).find((m) => {
       const txt = (m.message ?? '').toUpperCase()
-      return txt.includes('RESUME') || txt.includes('RESTART') || txt.includes('SUSPEND') || txt.includes('START ORDER')
+      return txt.includes('RESUME') || txt.includes('RESTART')
     })
     if (resumeMsg?.message) {
       bannerLabel = `RED FLAG — ${resumeMsg.message.toUpperCase()}`
     }
   } else if (statusCode === '4' && Array.isArray(raceControl)) {
-    const scInMsg = raceControl.find((m) => {
+    const scInMsg = raceControl.slice(0, 5).find((m) => {
       const txt = (m.message ?? '').toUpperCase()
       return txt.includes('SAFETY CAR IN THIS LAP') || txt.includes('SC IN THIS LAP')
     })
-    const formationMsg = raceControl.find((m) => {
-      const txt = (m.message ?? '').toUpperCase()
-      return txt.includes('FORMATION LAP')
-    })
     if (scInMsg?.message) {
       bannerLabel = 'SAFETY CAR IN THIS LAP — PREPARE FOR RESTART'
-    } else if (formationMsg?.message) {
-      bannerLabel = formationMsg.message.toUpperCase()
     }
   }
 
