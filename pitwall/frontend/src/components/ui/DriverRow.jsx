@@ -37,10 +37,10 @@ const DriverRow = memo(function DriverRow({
     expand: 'w-[5%] min-w-[20px]',
   }
 
-  const resolved = resolveDriver(driverNum, [])
+  const resolved = resolveDriver(driverNum, driver ? [driver] : [])
   const code = (driver?.code && isNaN(Number(driver.code))) 
     ? driver.code 
-    : (resolved?.code ?? resolveDriverCode(driverNum, []))
+    : (resolved?.code ?? resolveDriverCode(driverNum, driver ? [driver] : []))
   const pos       = timing?.position ?? driver?.position ?? '—'
   const gap       = formatGap(timing?.gap_to_leader ?? timing?.gap, pos)
   // Use direct field; if null, try summing sector times as fallback

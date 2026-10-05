@@ -429,6 +429,7 @@ export default function Live() {
     s3: 'w-[11%] min-w-[52px] text-center',
     tyre: 'w-[8%] min-w-[36px] text-center',
     pit: 'w-[5%] min-w-[22px] text-center',
+    expand: 'w-[5%] min-w-[20px]',
   }
 
   const currentLap = session.lap ?? sortedTiming[0]?.lap ?? (sortedTiming.length > 0 ? 1 : null)
@@ -599,7 +600,7 @@ export default function Live() {
                 {isSessionActive && sortedTiming.length > 0 && (
                   <div className="sticky top-0 z-10 w-full bg-pitwall-surface-2 border-b border-pitwall-border px-4 transition-all duration-300">
                     <div className="flex items-center h-7 px-0 w-full">
-                      <div className="w-[3px]" />
+                      <div className="w-[4px]" />
                       <div className={`${colWidths.pos} text-center font-mono text-[10px] text-pitwall-ghost tracking-widest transition-all duration-300`}>POS</div>
                       <div className={`${colWidths.drv} font-mono text-[10px] text-pitwall-ghost tracking-widest pl-1 transition-all duration-300`}>DRV</div>
                       <div className={`${colWidths.gap} font-mono text-[10px] text-pitwall-ghost tracking-widest transition-all duration-300`}>GAP</div>
@@ -609,6 +610,7 @@ export default function Live() {
                       <div className={`${colWidths.s3} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>S3</div>
                       <div className={`${colWidths.tyre} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>TYRE</div>
                       <div className={`${colWidths.pit} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>PIT</div>
+                      <div className={`${colWidths.expand} flex justify-center ml-auto pr-3`} />
                     </div>
                   </div>
                 )}
