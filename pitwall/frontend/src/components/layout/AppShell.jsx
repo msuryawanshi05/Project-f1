@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import useF1Store from '../../store/useF1Store'
@@ -14,7 +14,9 @@ const NAV = [
   { to: '/live',       label: 'LIVE',      key: '2' },
   { to: '/season',     label: 'SEASON',    key: '3' },
   { to: '/standings',  label: 'STANDINGS', key: '4' },
-  { to: '/drivers',    label: 'DRIVERS',   key: '5' },
+  // Drivers and Teams share one nav slot (the page carries the toggle), so the
+  // tab must stay highlighted on either route.
+  { to: '/drivers',    label: 'DRIVERS',   key: '5', alsoMatches: ['/teams'] },
   { to: '/results',    label: 'RESULTS',   key: '6' },
   { to: '/settings',   label: 'SETTINGS',  key: '7' },
 ]
@@ -95,6 +97,7 @@ export default function AppShell({ children, wsConnected }) {
   // The top bar said LIVE TIMING purely from session.phase, which stays at its
   // last value after the flag. Use the resolved lifecycle so a finished session
   // is not advertised as live.
+  const { pathname } = useLocation()
   const weekendState = useRaceWeekendState()
   const isLive       = weekendState.isLive === true
   const isProvisional = weekendState.provisional === true
@@ -214,7 +217,7 @@ export default function AppShell({ children, wsConnected }) {
         aria-label="Main navigation"
         className="fixed top-14 left-0 right-0 z-40 h-9 border-b border-pitwall-border flex items-center px-4 glass-panel bg-carbon"
       >
-        {NAV.map(({ to, label }) => (
+        {NAV.map(({ to, label, alsoMatches }) => (
           <NavLink
             key={to}
             to={to}
@@ -222,7 +225,12 @@ export default function AppShell({ children, wsConnected }) {
             className="flex items-center h-full px-5 font-display text-xs tracking-widest uppercase transition-colors relative select-none"
             role="tab"
           >
-            {({ isActive }) => (
+            {({ isActive: routeActive }) => {
+              // A tab that owns more than one route (Drivers also owns /teams)
+              // stays highlighted across all of them.
+              const isActive = routeActive
+                || (alsoMatches ?? []).some((prefix) => pathname.startsWith(prefix))
+              return (
               <>
                 <span className={`relative z-10 font-bold transition-colors ${isActive ? 'text-pitwall-text-strong' : 'text-pitwall-ghost hover:text-pitwall-text-strong'}`}>
                   {label}
@@ -235,7 +243,8 @@ export default function AppShell({ children, wsConnected }) {
                   />
                 )}
               </>
-            )}
+              )
+            }}
           </NavLink>
         ))}
       </nav>

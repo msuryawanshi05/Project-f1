@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
 import teamsData from '../data/teams.json'
+import SegmentedToggle from '../components/ui/SegmentedToggle'
+import TeamLogo from '../components/ui/TeamLogo'
 import { teamColour } from '../utils/teamColours'
 import { AnimatedNumber } from '../components/ui/AnimatedNumber'
 
@@ -15,24 +17,6 @@ import { AnimatedNumber } from '../components/ui/AnimatedNumber'
  */
 function getTeamColourByName(teamName, role = 'accent') {
   return teamColour(teamName, { role })
-}
-
-function teamSlug(name) {
-  if (!name) return '_fallback'
-  const clean = name.toLowerCase()
-  if (clean.includes('mercedes')) return 'mercedes'
-  if (clean.includes('ferrari')) return 'ferrari'
-  if (clean.includes('red bull') || clean.includes('redbull')) return 'red-bull'
-  if (clean.includes('mclaren')) return 'mclaren'
-  if (clean.includes('aston martin') || clean.includes('astonmartin')) return 'aston-martin'
-  if (clean.includes('alpine')) return 'alpine'
-  if (clean.includes('williams')) return 'williams'
-  if (clean.includes('haas')) return 'haas'
-  if (clean.includes('kick sauber') || clean.includes('sauber') || clean.includes('stake')) return 'kick-sauber'
-  if (clean.includes('rb') || clean.includes('racing bulls') || clean.includes('cash app')) return 'rb'
-  if (clean.includes('audi')) return 'audi'
-  if (clean.includes('cadillac')) return 'cadillac'
-  return '_fallback'
 }
 
 // ── Points bar ─────────────────────────────────────────────────────────────────
@@ -114,8 +98,6 @@ function ConstructorRow({ entry, maxPts, isLeader }) {
   const teamColour = getTeamColourByName(teamName, 'accent')
   const teamTextColour = getTeamColourByName(teamName, 'text')
   const pts       = parseFloat(entry.points ?? 0)
-  const slug      = teamSlug(teamName)
-  const logoUrl   = `/team-logos/${slug}.svg`
 
   return (
     <motion.div 
@@ -132,15 +114,7 @@ function ConstructorRow({ entry, maxPts, isLeader }) {
 
       {/* Grouped: Team logo image + Team name */}
       <div className="flex items-center gap-3 min-w-0">
-        <img
-          src={logoUrl}
-          alt={teamName}
-          className="w-5 h-5 object-contain dark:invert"
-          onError={(e) => {
-            e.target.onerror = null
-            e.target.src = '/team-logos/_fallback.svg'
-          }}
-        />
+        <TeamLogo name={teamName} size={20} />
         <span className="font-display font-bold text-sm tracking-wide text-pitwall-text-strong uppercase truncate">
           {teamName}
         </span>
@@ -187,17 +161,12 @@ export default function Standings() {
           Championship Standings
         </h1>
         <div className="flex border border-pitwall-border bg-pitwall-surface-2 p-0.5 rounded-sm">
-          {['DRIVERS', 'CONSTRUCTORS'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-1.5 font-display text-xs tracking-widest uppercase transition-all font-bold rounded-sm ${
-                tab === t ? 'bg-status-red text-white shadow-sm shadow-status-red/20' : 'text-pitwall-ghost hover:text-pitwall-text-strong'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+          <SegmentedToggle
+            options={['DRIVERS', 'CONSTRUCTORS']}
+            value={tab}
+            onChange={setTab}
+            ariaLabel="Standings view"
+          />
         </div>
       </div>
 

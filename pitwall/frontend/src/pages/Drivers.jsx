@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useMemo, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -12,6 +12,9 @@ import teamsData from '../data/teams.json'
 import {
   useSeasonDrivers, useGridMeta, useDriverProfile, useTeammateH2H,
 } from '../hooks/useDriverProfile'
+import SegmentedToggle from '../components/ui/SegmentedToggle'
+import DriverCompare from '../components/ui/DriverCompare'
+import { TeamsIndex, TeamDetail } from './Teams'
 
 const SEASON = new Date().getFullYear()
 
@@ -83,6 +86,18 @@ function DriversIndex() {
   const { drivers, loading, error } = useSeasonDrivers(SEASON)
   const meta = useGridMeta(sessionKey)
 
+  // Comparison mode. Two picks maximum; a third replaces the older one so the
+  // control never dead-ends with nothing to do but clear.
+  const [compareMode, setCompareMode] = useState(false)
+  const [picked, setPicked] = useState([])
+
+  const togglePick = useCallback((driverId) => {
+    setPicked((prev) => {
+      if (prev.includes(driverId)) return prev.filter((d) => d !== driverId)
+      return [...prev, driverId].slice(-2)
+    })
+  }, [])
+
   // Jolpica lists every driver who appeared, including reserves. The live grid
   // (or the headshot roster) tells us who is actually racing.
   const racing = useMemo(() => {
@@ -127,14 +142,41 @@ function DriversIndex() {
 
   return (
     <div className="min-h-full" style={{ background: 'var(--pw-bg)' }}>
-      <div className="border-b border-pitwall-border px-6 py-4">
-        <h1 className="font-display font-bold text-3xl tracking-widest text-pitwall-text-strong uppercase">
-          Drivers
-        </h1>
-        <div className="font-mono text-xs text-pitwall-dim mt-1">
-          {racing.length} drivers · {SEASON} World Championship
+      <div className="border-b border-pitwall-border px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-display font-bold text-3xl tracking-widest text-pitwall-text-strong uppercase">
+            Drivers
+          </h1>
+          <div className="font-mono text-xs text-pitwall-dim mt-1">
+            {racing.length} drivers · {SEASON} World Championship
+            {compareMode && ` · ${picked.length}/2 selected`}
+          </div>
         </div>
+        <button
+          onClick={() => { setCompareMode((v) => !v); setPicked([]) }}
+          className={`font-display text-[11px] tracking-widest uppercase font-bold px-3 py-1.5 rounded-sm border transition-colors ${
+            compareMode
+              ? 'border-status-red text-status-red bg-status-red/10'
+              : 'border-pitwall-border text-pitwall-dim hover:text-pitwall-text-strong'
+          }`}
+        >
+          {compareMode ? 'Exit compare' : 'Compare drivers'}
+        </button>
       </div>
+
+      {compareMode && (
+        <div className="px-6 pt-5">
+          {picked.length === 2 ? (
+            <DriverCompare driverIdA={picked[0]} driverIdB={picked[1]} onClear={() => setPicked([])} />
+          ) : (
+            <div className="border border-dashed border-pitwall-border rounded-sm px-4 py-3 font-mono text-[11px] text-pitwall-dim">
+              Select {2 - picked.length} more driver{picked.length === 1 ? '' : 's'} to compare.
+              Teammates get a direct head-to-head; drivers in different cars are shown as
+              absolute totals only.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-6">
         {racing.map((d, i) => (
@@ -144,11 +186,17 @@ function DriversIndex() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, delay: Math.min(i * 0.02, 0.3) }}
           >
-            <Link
-              to={`/drivers/${d.driverId}`}
-              className="flex items-center gap-3 p-3 border border-pitwall-border rounded-sm hover:border-pitwall-ghost transition-colors group"
-              style={{ background: 'var(--pw-surface)', borderLeft: `3px solid ${d.colour}` }}
-            >
+            {(() => {
+            const selected = picked.includes(d.driverId)
+            const cardClass = `w-full text-left flex items-center gap-3 p-3 border rounded-sm transition-colors group ${
+              selected ? 'border-status-red' : 'border-pitwall-border hover:border-pitwall-ghost'
+            }`
+            const cardStyle = {
+              background: selected ? 'var(--pw-surface-2)' : 'var(--pw-surface)',
+              borderLeft: `3px solid ${d.colour}`,
+            }
+            const Inner = (
+              <>
               <Headshot src={d.headshot} code={d.code} colour={d.colour} size={56} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -170,9 +218,20 @@ function DriversIndex() {
                 </div>
               </div>
               <span className="font-mono text-[10px] text-pitwall-ghost group-hover:text-pitwall-text-strong transition-colors">
-                ›
+                {compareMode ? (selected ? '✓' : '+') : '›'}
               </span>
-            </Link>
+              </>
+            )
+            return compareMode ? (
+              <button type="button" onClick={() => togglePick(d.driverId)} aria-pressed={selected} className={cardClass} style={cardStyle}>
+                {Inner}
+              </button>
+            ) : (
+              <Link to={`/drivers/${d.driverId}`} className={cardClass} style={cardStyle}>
+                {Inner}
+              </Link>
+            )
+            })()}
           </motion.div>
         ))}
       </div>
@@ -434,7 +493,65 @@ function DriverDetail({ driverId }) {
   )
 }
 
-export default function Drivers() {
-  const { driverId } = useParams()
-  return driverId ? <DriverDetail driverId={driverId} /> : <DriversIndex />
+/**
+ * One page, two views, mirroring the Standings tab.
+ *
+ * Drivers and teams were separate concerns competing for one nav slot; the
+ * toggle keeps them together the way Standings already does for drivers and
+ * constructors, using the same SegmentedToggle rather than a second lookalike.
+ * The URL still distinguishes them (/drivers, /teams) so a view is linkable.
+ */
+export default function Drivers({ view = 'DRIVERS' }) {
+  const { driverId, constructorId } = useParams()
+  const navigate = useNavigate()
+
+  // A detail page is its own thing — no toggle, it would have nothing to switch.
+  if (driverId) return <DriverDetail driverId={driverId} />
+  if (constructorId) {
+    return (
+      <div className="min-h-full p-6" style={{ background: 'var(--pw-bg)' }}>
+        <TeamDetail constructorId={constructorId} />
+      </div>
+    )
+  }
+
+  if (view === 'TEAMS') {
+    return (
+      <div className="min-h-full" style={{ background: 'var(--pw-bg)' }}>
+        <div className="border-b border-pitwall-border px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="font-display font-bold text-3xl tracking-widest text-pitwall-text-strong uppercase">
+              Teams
+            </h1>
+            <div className="font-mono text-xs text-pitwall-dim mt-1">
+              {SEASON} Constructors' Championship
+            </div>
+          </div>
+          <SegmentedToggle
+            options={[{ value: 'DRIVERS', label: 'Drivers' }, { value: 'TEAMS', label: 'Teams' }]}
+            value="TEAMS"
+            onChange={(v) => navigate(v === 'TEAMS' ? '/teams' : '/drivers')}
+            ariaLabel="Drivers or teams"
+          />
+        </div>
+        <div className="p-6">
+          <TeamsIndex />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="px-6 pt-4 flex justify-end" style={{ background: 'var(--pw-bg)' }}>
+        <SegmentedToggle
+          options={[{ value: 'DRIVERS', label: 'Drivers' }, { value: 'TEAMS', label: 'Teams' }]}
+          value="DRIVERS"
+          onChange={(v) => navigate(v === 'TEAMS' ? '/teams' : '/drivers')}
+          ariaLabel="Drivers or teams"
+        />
+      </div>
+      <DriversIndex />
+    </>
+  )
 }

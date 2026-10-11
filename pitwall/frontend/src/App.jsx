@@ -204,8 +204,12 @@ function AppInner({ connected }) {
             <Route path="/standings" element={<Standings />} />
             {/* One component serves both: the index lists the grid, the
                 :driverId form renders that driver's profile. */}
-            <Route path="/drivers"            element={<Drivers />} />
-            <Route path="/drivers/:driverId"  element={<Drivers />} />
+            <Route path="/drivers"                element={<Drivers />} />
+            <Route path="/drivers/:driverId"      element={<Drivers />} />
+            {/* Same component, Teams view — one nav slot, two views, mirroring
+                the Standings tab's Drivers|Constructors toggle. */}
+            <Route path="/teams"                  element={<Drivers view="TEAMS" />} />
+            <Route path="/teams/:constructorId"   element={<Drivers view="TEAMS" />} />
             <Route path="/results"   element={<Results />}   />
             <Route path="/settings"  element={<Settings />}  />
             <Route path="*"          element={<NotFound />}  />

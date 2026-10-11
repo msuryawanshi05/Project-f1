@@ -399,7 +399,14 @@ _JOLPICA_RETRY_DELAYS = (0.8, 2.0, 4.0, 7.0)
 # mid-run (observed 2023/2024/2025 all rejected in the same 200ms window).
 # Pacing the START of each request keeps a cold profile inside the limit, so
 # the retry path stays an exception rather than the norm.
-_JOLPICA_MIN_INTERVAL = 0.22   # seconds between request starts (~4.5 req/s)
+# Measured 2026-10-11 by sending 40 sequential requests at several intervals:
+#   250ms (4.0/s) -> 20 of 40 rate-limited
+#   400ms (2.5/s) -> 40 of 40 succeeded
+# So the limit is sustained, not just a burst allowance, and ~2.5/s is the
+# ceiling. A 77-season constructor is ~87 requests, i.e. ~35s cold — slow, but
+# it is cached for 30 minutes (active) or 24 hours (historic) afterwards, and
+# a slow correct answer beats a fast partial one.
+_JOLPICA_MIN_INTERVAL = 0.40   # seconds between request starts (~2.5 req/s)
 _jolpica_gate = asyncio.Lock()
 _jolpica_next_at = 0.0
 
@@ -466,6 +473,24 @@ async def _jolpica_count(client: httpx.AsyncClient, path: str) -> tuple[int | No
         return int(data["MRData"]["total"]), True
     except (KeyError, TypeError, ValueError):
         return None, False
+
+
+async def _retry_failed_seasons(client, season_results, fetch_row):
+    """
+    Second pass over seasons whose request failed.
+
+    Run sequentially after the main sweep, so the rate-limit window has drained.
+    Without it a single straggler nulls the whole championship count — which is
+    correct behaviour, but needlessly pessimistic when a retry would succeed.
+    """
+    out = list(season_results)
+    for i, (year, row, failed) in enumerate(out):
+        if not failed:
+            continue
+        await asyncio.sleep(0.6)
+        retried = await fetch_row(year)
+        out[i] = retried
+    return out
 
 
 @app.get("/api/driver/{driver_id}/career")
@@ -552,6 +577,8 @@ async def driver_career(driver_id: str):
             }, False
 
         season_results = await asyncio.gather(*(_season_row(y) for y in seasons))
+        if any(failed for _, _, failed in season_results):
+            season_results = await _retry_failed_seasons(client, season_results, _season_row)
 
     rows = [row for _, row, _ in season_results if row]
     season_failures = sum(1 for _, _, failed in season_results if failed)
@@ -604,6 +631,160 @@ async def driver_career(driver_id: str):
         ttl = CAREER_TTL_CURRENT if current else CAREER_TTL_HISTORIC
     await api_cache_set(cache_key, payload, ttl)
 
+    return payload
+
+
+@app.get("/api/constructor/{constructor_id}/career")
+async def constructor_career(constructor_id: str):
+    """
+    Aggregate one constructor's career, per-season record and current lineup.
+
+    Mirrors /api/driver/{id}/career — same pacing, same cache, same honesty
+    contract: a partial season list yields a null championship count rather
+    than a wrong one.
+
+    Note `entries` is not "races": Jolpica counts one result row per CAR, so a
+    two-car team records two entries per Grand Prix. It is labelled as entries
+    in the UI for that reason.
+    """
+    if not constructor_id or len(constructor_id) > 64 or "/" in constructor_id:
+        return {"error": "invalid constructor id"}
+
+    cache_key = f"ctor:{constructor_id}"
+    cached = await api_cache_get(cache_key)
+    if cached:
+        cached["cached"] = True
+        return cached
+
+    season = date.today().year
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        profile_json, seasons_json = await asyncio.gather(
+            _jolpica_get(client, f"/constructors/{constructor_id}.json"),
+            _jolpica_get(client, f"/constructors/{constructor_id}/seasons.json?limit=100"),
+        )
+        ctors = (profile_json or {}).get("MRData", {}).get("ConstructorTable", {}).get("Constructors", [])
+        if not ctors:
+            return {"error": "constructor not found", "constructorId": constructor_id}
+        profile = ctors[0]
+
+        seasons = [
+            x.get("season")
+            for x in (seasons_json or {}).get("MRData", {}).get("SeasonTable", {}).get("Seasons", [])
+            if x.get("season")
+        ]
+
+        count_paths = [
+            f"/constructors/{constructor_id}/results.json?limit=1",
+            f"/constructors/{constructor_id}/results/1.json?limit=1",
+            f"/constructors/{constructor_id}/qualifying/1.json?limit=1",
+            f"/constructors/{constructor_id}/fastest/1/results.json?limit=1",
+        ]
+        counts = await asyncio.gather(*(_jolpica_count(client, p) for p in count_paths))
+        (entries, entries_ok), (wins, wins_ok), (poles, poles_ok), (fl, fl_ok) = counts
+
+        async def _season_row(year: str):
+            data = await _jolpica_get(
+                client, f"/{year}/constructors/{constructor_id}/constructorstandings.json"
+            )
+            if data is None:
+                return year, None, True
+            lists = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
+            if not lists or not lists[0].get("ConstructorStandings"):
+                return year, None, False
+            st = lists[0]["ConstructorStandings"][0]
+            def _int(v, default=None):
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return default
+            def _float(v):
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return 0.0
+            return year, {
+                "season": year,
+                "position": _int(st.get("position")),
+                "points": _float(st.get("points", 0)),
+                "wins": _int(st.get("wins", 0), 0),
+            }, False
+
+        season_results = await asyncio.gather(*(_season_row(y) for y in seasons))
+        if any(failed for _, _, failed in season_results):
+            season_results = await _retry_failed_seasons(client, season_results, _season_row)
+
+        # Current lineup. The roster includes reserve and practice drivers, so
+        # rank by races actually started this season — the same correction the
+        # teammate head-to-head needs.
+        lineup = []
+        roster_json = await _jolpica_get(
+            client, f"/{season}/constructors/{constructor_id}/drivers.json?limit=20"
+        )
+        roster = (roster_json or {}).get("MRData", {}).get("DriverTable", {}).get("Drivers", [])
+        if roster:
+            starts = await asyncio.gather(*(
+                _jolpica_count(client, f"/{season}/drivers/{d['driverId']}/results.json?limit=1")
+                for d in roster
+            ))
+            ranked = sorted(
+                zip(roster, [c[0] or 0 for c in starts]),
+                key=lambda pair: pair[1], reverse=True,
+            )
+            lineup = [
+                {
+                    "driverId": d.get("driverId"),
+                    "code": d.get("code"),
+                    "givenName": d.get("givenName"),
+                    "familyName": d.get("familyName"),
+                    "permanentNumber": d.get("permanentNumber"),
+                    "starts": n,
+                }
+                for d, n in ranked if n > 0
+            ]
+
+    rows = [row for _, row, _ in season_results if row]
+    season_failures = sum(1 for _, _, failed in season_results if failed)
+    rows.sort(key=lambda r: int(r["season"]))
+
+    current = next((r for r in rows if r["season"] == str(season)), None)
+    seasons_complete = season_failures == 0
+    championships = sum(1 for r in rows if r["position"] == 1) if seasons_complete else None
+
+    missing = [
+        label for ok, label in (
+            (entries_ok, "entries"),
+            (wins_ok, "wins"),
+            (poles_ok, "poles"),
+            (fl_ok, "fastest laps"),
+            (seasons_complete, "championships"),
+        ) if not ok
+    ]
+
+    payload = {
+        "constructorId": constructor_id,
+        "profile": profile,
+        "seasons": rows,
+        "current": current,
+        "lineup": lineup,
+        "career": {
+            "entries": entries,
+            "wins": wins,
+            "poles": poles,
+            "fastestLaps": fl,
+            "championships": championships,
+            "seasonCount": len(rows) if seasons_complete else None,
+            "firstSeason": rows[0]["season"] if rows else None,
+        },
+        "partial": bool(missing),
+        "missing": missing,
+        "seasonFailures": season_failures,
+        "expectedSeasons": len(seasons),
+        "cached": False,
+    }
+
+    ttl = 120.0 if missing else (CAREER_TTL_CURRENT if current else CAREER_TTL_HISTORIC)
+    await api_cache_set(cache_key, payload, ttl)
     return payload
 
 

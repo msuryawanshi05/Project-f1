@@ -408,3 +408,75 @@ export function useTeammateH2H(driverId, teamId, year = SEASON) {
 
   return state
 }
+
+// ── Constructors ────────────────────────────────────────────────────────────
+/** The current season's constructors, from Jolpica. */
+export function useSeasonConstructors(year = SEASON) {
+  const [state, setState] = useState({ constructors: [], loading: true, error: null })
+
+  useEffect(() => {
+    const cacheKey = `pitwall_seasonctors_${year}`
+    const cached = readCache(cacheKey)
+    if (cached) setState({ constructors: cached, loading: false, error: null })
+
+    const ctrl = new AbortController()
+    jget(`/${year}/constructors.json?limit=100`, ctrl.signal)
+      .then((json) => {
+        const rows = json?.MRData?.ConstructorTable?.Constructors ?? []
+        writeCache(cacheKey, rows)
+        setState({ constructors: rows, loading: false, error: null })
+      })
+      .catch((e) => {
+        if (e.name === 'AbortError') return
+        setState((prev) => ({
+          constructors: prev.constructors,
+          loading: false,
+          error: prev.constructors.length ? null : e.message,
+        }))
+      })
+    return () => ctrl.abort()
+  }, [year])
+
+  return state
+}
+
+/**
+ * One constructor's career, from the backend.
+ *
+ * Same shape and same honesty contract as useDriverProfile — see
+ * /api/constructor/{id}/career. A 77-season team is ~87 upstream requests, so
+ * this is firmly a backend job; the browser makes one call.
+ */
+export function useConstructorProfile(constructorId) {
+  const [state, setState] = useState({ data: null, loading: true, error: null })
+
+  useEffect(() => {
+    if (!constructorId) {
+      setState({ data: null, loading: false, error: null })
+      return
+    }
+    const cacheKey = `pitwall_ctor_${constructorId}_${SEASON}`
+    const cached = readCache(cacheKey)
+    if (cached) setState({ data: cached, loading: false, error: null })
+
+    const ctrl = new AbortController()
+    let cancelled = false
+    fetch(`${API_BASE}/api/constructor/${encodeURIComponent(constructorId)}/career`, { signal: ctrl.signal })
+      .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() })
+      .then((json) => {
+        if (cancelled) return
+        if (json?.error) throw new Error(json.error)
+        if (!json.partial) writeCache(cacheKey, json)
+        setState({ data: json, loading: false, error: null })
+      })
+      .catch((e) => {
+        if (cancelled || e.name === 'AbortError') return
+        setState((prev) => ({
+          data: prev.data, loading: false, error: prev.data ? null : e.message,
+        }))
+      })
+    return () => { cancelled = true; ctrl.abort() }
+  }, [constructorId])
+
+  return state
+}
