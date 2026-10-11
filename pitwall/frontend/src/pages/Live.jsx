@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
 import useRaceWeekendState from '../hooks/useRaceWeekendState'
@@ -16,6 +17,7 @@ import RadioTab from './live/RadioTab'
 import { useQualifyingGrid } from '../hooks/useQualifyingGrid'
 import { getTowerColumns, towerGridTemplate, towerMinWidth } from '../utils/layoutConstants'
 import { getQualifyingCut, isQualifyingSessionName, qualifyingHeaderLabel } from '../utils/qualifyingUtils'
+import { SessionState, sessionStateLabel } from '../utils/sessionLifecycle'
 import QualifyingGridTower from '../components/ui/QualifyingGridTower'
 
 // ── Countdown inline ──────────────────────────────────────────────────────────
@@ -105,7 +107,13 @@ function WeekendPanel({ weekendState, weather }) {
   }
 
   const isWeekend = mode === 'WEEKEND_BETWEEN_SESSIONS' || mode === 'WEEKEND_SESSION_SOON'
-  const headerLabel = isWeekend ? 'RACE WEEKEND IN PROGRESS' : mode === 'WEEKEND_UPCOMING' ? 'UPCOMING RACE' : 'UPCOMING RACE'
+  // A race that has just run is not "upcoming". Without this case the sidebar
+  // labelled a finished Grand Prix as the next one.
+  const headerLabel = mode === 'RESULTS_PENDING'
+    ? 'JUST FINISHED'
+    : isWeekend
+    ? 'RACE WEEKEND IN PROGRESS'
+    : 'UPCOMING RACE'
 
   return (
     <div className="overflow-y-auto h-full">
@@ -230,6 +238,35 @@ function TowerEmptyState({ weekendState }) {
     )
   }
 
+  if (mode === 'RESULTS_PENDING') {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 p-8 text-center">
+        <span className="text-3xl" role="img" aria-hidden="true">🏁</span>
+        <div className="font-display text-sm font-bold tracking-widest uppercase text-pitwall-text-strong">
+          Session Complete
+        </div>
+        {currentRace && (
+          <div className="font-mono text-xs text-pitwall-dim">
+            {currentRace.raceName?.replace(' Grand Prix', ' GP')}
+          </div>
+        )}
+        {/* Jolpica publishes a classification minutes to hours after the flag —
+            round 17 still returned total=0 an hour afterwards. An explicit wait
+            state beats an empty table that looks broken. */}
+        <div className="font-mono text-[11px] text-pitwall-dim max-w-xs leading-relaxed mt-1">
+          Official classification has not been published yet. It usually appears within a
+          few hours of the chequered flag.
+        </div>
+        <Link
+          to="/results"
+          className="font-mono text-[10px] tracking-widest uppercase underline text-pitwall-ghost hover:text-pitwall-text-strong mt-2"
+        >
+          Go to results
+        </Link>
+      </div>
+    )
+  }
+
   return (
     <EmptyState
       icon="🏁"
@@ -287,7 +324,12 @@ export default function Live() {
   const qualifying  = useF1Store((s) => s.qualifying)
 
   const weekendState = useRaceWeekendState()
-  const isLive = weekendState.mode === 'SESSION_LIVE'
+  // `isLive` means timing is still changing. The provisional window also
+  // renders the tower but is NOT live, so the two must not be conflated.
+  const isLive        = weekendState.isLive === true
+  const isProvisional = weekendState.provisional === true
+  const showsTower    = weekendState.mode === 'SESSION_LIVE'
+  const resultsPending = weekendState.mode === 'RESULTS_PENDING'
   const currentRound = weekendState.currentRace?.round
   const { grid: qualifyingGrid, raceInfo: qualiRaceInfo, loading: qualiLoading } = useQualifyingGrid(currentRound)
 
@@ -469,14 +511,28 @@ export default function Live() {
   const procTxt = (recentProcedureMsg?.message || recentProcedureMsg?.msg || '').toUpperCase()
   const isSuspended = !isRaceStarted && (procTxt.includes('SUSPEND') || procTxt.includes('DELAY'))
   const isFormationLap = !isRaceStarted && !isSuspended && (procTxt.includes('FORMATION LAP') || procTxt.includes('BEHIND SAFETY CAR'))
-  const isSessionActive = isSuspended || isFormationLap || ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase) || (session.phase !== 'PRE' && (isLive || sortedTiming.length > 0)) || (sortedTiming.length > 0 && (isLive || isFormationLap || isSuspended))
+  // Whether the tower is the right surface right now. Driven by the resolved
+  // lifecycle, not by "do we happen to have timing rows" — retained rows
+  // outlive the session and used to keep this true indefinitely.
+  const isSessionActive = showsTower && (sortedTiming.length > 0 || isSuspended || isFormationLap)
 
 
+
+  // A starting grid describes a race that has not happened yet. Once the race
+  // has run — or we are waiting on its official classification — showing one
+  // presents a finished Grand Prix as upcoming.
+  const showStartingGrid = qualifyingGrid.length > 0
+    && preRaceView === 'GRID'
+    && !resultsPending
+    && !isRaceStarted
+    && session.phase !== 'FINISHED'
 
   const sessionHeaderTitle = isSuspended
     ? 'START PROCEDURE SUSPENDED'
     : isFormationLap
     ? 'FORMATION LAP'
+    : isProvisional
+    ? `${session.name ? session.name.toUpperCase() : 'SESSION'} — PROVISIONAL`
     : isSessionActive
     ? (session.name ? session.name.toUpperCase() : 'RACE')
     : weekendState.currentRace?.raceName ?? 'NO SESSION'
@@ -491,6 +547,8 @@ export default function Live() {
     ? (raceControl[0]?.message?.toUpperCase()?.includes('START ORDER') ? 'ORIGINAL GRID' : 'START SUSPENDED')
     : isFormationLap
     ? 'BEHIND SAFETY CAR'
+    : isProvisional
+    ? 'CLASSIFICATION — UNOFFICIAL'
     : isSessionActive
     ? (qualiHeaderLabel ?? `LAP ${currentLap ?? '—'} / ${totalLaps ?? '—'}`)
     // Before lights out there is no lap 0 — the race hasn't started. Showing
@@ -572,6 +630,24 @@ export default function Live() {
       {/* Track status banner */}
       <TrackStatusBanner statusCode={trackStatus.status} />
 
+      {/* The session is over but these are the retained timing rows, not a live
+          feed. Say so plainly — this is the window the old code spent showing a
+          finished race as live. */}
+      {isProvisional && (
+        <div
+          role="status"
+          className="flex items-center gap-2 px-4 py-1.5 border-b border-amber-500/40 bg-amber-500/10"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" aria-hidden="true" />
+          <span className="font-display text-[10px] font-bold tracking-widest uppercase text-amber-500 dark:text-amber-400">
+            {sessionStateLabel(SessionState.PROVISIONAL)}
+          </span>
+          <span className="font-mono text-[10px] text-pitwall-dim">
+            Session finished — showing the final timing state. Not live, and not yet official.
+          </span>
+        </div>
+      )}
+
       {/* ── TOWER TAB ─────────────────────────────────────────────── */}
       {activeTab === 'TOWER' && (
         <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
@@ -589,7 +665,7 @@ export default function Live() {
               <div className="flex items-center gap-2">
                 <span className="font-display font-semibold text-sm tracking-wider uppercase"
                   style={{ color: 'var(--pw-text)' }}>
-                  {!isSessionActive && qualifyingGrid.length > 0 && preRaceView === 'GRID'
+                  {!isSessionActive && showStartingGrid
                     ? 'PROVISIONAL STARTING GRID'
                     : sessionHeaderTitle}
                 </span>
@@ -602,14 +678,14 @@ export default function Live() {
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40 animate-pulse">
                     FORMATION LAP
                   </span>
-                ) : !isSessionActive && qualifyingGrid.length > 0 ? (
+                ) : !isSessionActive && showStartingGrid ? (
                   <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-status-green/15 text-status-green border border-status-green/30">
                     QUALI COMPLETE
                   </span>
                 ) : null}
               </div>
               <div className="flex items-center gap-2.5">
-                {!isSessionActive && qualifyingGrid.length > 0 && (
+                {!isSessionActive && (showStartingGrid || (qualifyingGrid.length > 0 && !resultsPending && !isRaceStarted)) && (
                   <div className="flex items-center bg-pitwall-surface-2 p-0.5 rounded border border-pitwall-border">
                     <button
                       onClick={() => setPreRaceView('GRID')}
@@ -670,9 +746,9 @@ export default function Live() {
                 )}
 
                 {/* Driver rows / starting grid / skeleton / smart empty state */}
-                <div className={`flex-1 ${(!isSessionActive && preRaceView === 'GRID' && qualifyingGrid.length > 0) ? 'px-0 py-0' : 'px-4 py-1.5'}`}>
+                <div className={`flex-1 ${(!isSessionActive && showStartingGrid) ? 'px-0 py-0' : 'px-4 py-1.5'}`}>
                   {(!isSessionActive || sortedTiming.length === 0) ? (
-                    qualifyingGrid.length > 0 && preRaceView === 'GRID' ? (
+                    showStartingGrid ? (
                       <QualifyingGridTower grid={qualifyingGrid} raceInfo={qualiRaceInfo} loading={qualiLoading} />
                     ) : isLive && !qualifyingGrid.length ? (
                       <div>
@@ -739,12 +815,12 @@ export default function Live() {
                 <div className="px-4 pt-3 pb-1 border-b border-pitwall-border">
                   <span className="font-mono text-[10px] tracking-widest uppercase"
                     style={{ color: 'var(--pw-ghost)' }}>
-                    {isLive ? 'Track Map' : 'Circuit'}
+                    {showsTower ? 'Track Map' : 'Circuit'}
                   </span>
                 </div>
                 <div className="p-4 overflow-y-auto h-full">
-                  {isLive ? (
-                    /* Live session — show map + live weather */
+                  {showsTower ? (
+                    /* Running or provisional — map + weather + race control */
                     <div className="flex flex-col gap-4">
                       <TrackMap circuitData={weekendState.circuitData} compact showStats={false} />
                       <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase mb-2">Weather</div>

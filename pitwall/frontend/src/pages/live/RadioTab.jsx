@@ -247,12 +247,18 @@ export default function RadioTab() {
   const sessionKey     = useF1Store((s) => s.currentSessionKey)
   const raceControl    = useF1Store((s) => s.raceControl)
 
-  const isFormationLap = raceControl.some((m) => {
+  // Only a RECENT start-procedure message means the session is starting.
+  // An unbounded scan kept this panel "live" long after the chequered flag.
+  const RC_FRESH_MS = 10 * 60 * 1000
+  const isFormationLap = session.phase !== 'FINISHED' && raceControl.some((m) => {
+    const ts = m.time ? Date.parse(m.time) : NaN
+    if (!Number.isFinite(ts) || Date.now() - ts > RC_FRESH_MS) return false
     const txt = (m.message || m.msg || '').toUpperCase()
     return txt.includes('FORMATION LAP') || txt.includes('START PROCEDURE')
   })
 
-  const isLive = isFormationLap || (session.phase !== 'PRE' && ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase))
+  const isLive = isFormationLap || (session.phase !== 'PRE' && session.phase !== 'FINISHED'
+    && ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase))
 
   // Never pre-populate with past race clips — always start empty
   const [radioClips, setRadioClips] = useState([])

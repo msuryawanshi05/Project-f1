@@ -5,6 +5,7 @@ import useF1Store from '../../store/useF1Store'
 import { getTrackStatus, formatCountdown } from '../../utils/driverUtils'
 import NotificationStack from '../ui/NotificationStack'
 import useNotificationTriggers from '../../hooks/useNotificationTriggers'
+import useRaceWeekendState from '../../hooks/useRaceWeekendState'
 import DataMonitor from '../dev/DataMonitor'
 import BroadcastBanner from '../ui/BroadcastBanner'
 
@@ -91,7 +92,12 @@ export default function AppShell({ children, wsConnected }) {
   // Mount notification trigger watchers
   useNotificationTriggers()
 
-  const isLive  = ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
+  // The top bar said LIVE TIMING purely from session.phase, which stays at its
+  // last value after the flag. Use the resolved lifecycle so a finished session
+  // is not advertised as live.
+  const weekendState = useRaceWeekendState()
+  const isLive       = weekendState.isLive === true
+  const isProvisional = weekendState.provisional === true
   const ts      = getTrackStatus(trackStatus.status)
 
   // Session-aware next session info
@@ -124,11 +130,21 @@ export default function AppShell({ children, wsConnected }) {
 
         {/* Centre — session status OR next session countdown */}
         <div className="flex-1 flex items-center justify-center gap-3">
-          {isLive ? (
-            <div className="flex items-center gap-3 bg-status-red/10 border border-status-red/30 px-3 py-1 rounded-sm">
-              <span className="led-dot red" aria-hidden="true" />
-              <span className="font-display text-xs font-bold tracking-widest text-status-red uppercase">
-                LIVE TIMING
+          {isLive || isProvisional ? (
+            <div
+              className={`flex items-center gap-3 px-3 py-1 rounded-sm border ${
+                isLive
+                  ? 'bg-status-red/10 border-status-red/30'
+                  : 'bg-amber-500/10 border-amber-500/30'
+              }`}
+            >
+              <span className={isLive ? 'led-dot red' : 'w-2 h-2 rounded-full bg-amber-400'} aria-hidden="true" />
+              <span
+                className={`font-display text-xs font-bold tracking-widest uppercase ${
+                  isLive ? 'text-status-red' : 'text-amber-500 dark:text-amber-400'
+                }`}
+              >
+                {isLive ? 'LIVE TIMING' : 'PROVISIONAL'}
               </span>
               <span className="font-mono text-xs font-semibold text-pitwall-text-strong tracking-wide">
                 {session.name?.toUpperCase() ?? 'SESSION'} · LAP {session.lap ?? '—'}/{session.total_laps ?? '—'}

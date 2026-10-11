@@ -21,6 +21,7 @@
 import { useMemo } from 'react'
 import useF1Store from '../store/useF1Store'
 import { matchCircuit } from '../utils/circuitUtils'
+import { resolveSessionState, SessionState } from '../utils/sessionLifecycle'
 
 const SESSION_LABELS = {
   FirstPractice:    'FP1',
@@ -69,17 +70,49 @@ export default function useRaceWeekendState() {
   const calendar    = useF1Store((s) => s.calendar)
   const raceControl = useF1Store((s) => s.raceControl)
   const timing      = useF1Store((s) => s.timing)
+  const sessionMeta = useF1Store((s) => s.sessionMeta)
 
   return useMemo(() => {
     const now = new Date()
 
     // ── SESSION_LIVE — trust the WebSocket phase, active lap count, or active formation lap ────────
+    // A formation-lap message only means the session is starting if it is
+    // RECENT. Scanning all 50 retained messages with no time bound meant an
+    // hour-old "FORMATION LAP" line kept forcing the live branch — the same
+    // stale-message defect fixed in StatusBar and BroadcastBanner.
+    const RC_FRESH_MS = 10 * 60 * 1000
     const isFormation = raceControl.some((m) => {
+      const ts = m.time ? Date.parse(m.time) : NaN
+      if (!Number.isFinite(ts) || now.getTime() - ts > RC_FRESH_MS) return false
       const t = (m.message || m.msg || '').toUpperCase()
       return t.includes('FORMATION LAP') || t.includes('START PROCEDURE')
     })
-    const isLivePhase = isFormation || ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase) || Boolean(session.lap && session.lap >= 1) || (timing.length > 0 && session.phase !== 'PRE')
-    if (isLivePhase) {
+
+    // Session lifecycle, resolved from the clock plus the feed — NOT from the
+    // presence of timing rows.
+    //
+    // The previous expression was:
+    //   isFormation || [LIVE,RACE,...].includes(phase)
+    //     || Boolean(session.lap && session.lap >= 1)
+    //     || (timing.length > 0 && session.phase !== 'PRE')
+    //
+    // After the chequered flag session.lap is 62 and timing is still populated
+    // from the retained cache, so the last two disjuncts stayed true forever
+    // and a finished race never stopped being "live".
+    const feedLive = isFormation
+      || ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase)
+    const lifecycle = resolveSessionState({
+      now: now.getTime(),
+      sessionStart: sessionMeta.dateStart,
+      sessionEnd: sessionMeta.dateEnd,
+      // Only trust "the feed is live" when the feed says so AND the schedule
+      // has not already closed the session out by more than the grace window.
+      liveFeedActive: feedLive && session.phase !== 'FINISHED',
+      feedFinished: session.phase === 'FINISHED',
+      hasTimingState: timing.length > 0,
+    })
+
+    if (lifecycle.showTower) {
       let activeRace = null
       for (const race of calendar) {
         const sessions = buildSessions(race)
@@ -115,7 +148,13 @@ export default function useRaceWeekendState() {
       const circuitData = race ? matchCircuit(race) : null
 
       return {
+        // SESSION_LIVE covers both a running session and the provisional
+        // window, because both render the tower. `provisional` distinguishes
+        // them and the header must not say "live" when it is set.
         mode: 'SESSION_LIVE',
+        sessionState: lifecycle.state,
+        provisional: lifecycle.provisional,
+        isLive: lifecycle.isLive,
         currentRace: race,
         nextSession: null,
         lastSession: null,
@@ -124,9 +163,34 @@ export default function useRaceWeekendState() {
       }
     }
 
+    // Session is over and the tower is no longer the right surface. Surface the
+    // state so the Live page can say whether official results are merely
+    // pending (Jolpica lags by minutes to hours) rather than showing nothing.
+    if (lifecycle.state === SessionState.RESULTS_PENDING) {
+      const finishedRace = calendar.find((race) => {
+        const sessions = buildSessions(race)
+        const last = sessions[sessions.length - 1]?.dt
+        return last && now - last < 12 * 60 * 60 * 1000 && now >= last
+      }) ?? null
+      return {
+        mode: 'RESULTS_PENDING',
+        sessionState: lifecycle.state,
+        provisional: false,
+        isLive: false,
+        currentRace: finishedRace,
+        nextSession: null,
+        lastSession: null,
+        weekendSessions: finishedRace ? buildSessions(finishedRace) : [],
+        circuitData: finishedRace ? matchCircuit(finishedRace) : null,
+      }
+    }
+
     if (!calendar.length) {
       return {
         mode: 'OFF_WEEKEND',
+        sessionState: SessionState.IDLE,
+        provisional: false,
+        isLive: false,
         currentRace: null,
         nextSession: null,
         lastSession: null,
@@ -208,6 +272,9 @@ export default function useRaceWeekendState() {
 
       return {
         mode,
+        sessionState: lifecycle.state,
+        provisional: false,
+        isLive: false,
         currentRace:    race,
         nextSession:    nextSession ? {
           label:    nextSession.label,
@@ -235,6 +302,9 @@ export default function useRaceWeekendState() {
 
       return {
         mode,
+        sessionState: lifecycle.state,
+        provisional: false,
+        isLive: false,
         currentRace: race,
         nextSession: sessions[0] ? {
           label:    sessions[0].label,
@@ -250,6 +320,9 @@ export default function useRaceWeekendState() {
 
     return {
       mode: 'OFF_WEEKEND',
+      sessionState: SessionState.IDLE,
+      provisional: false,
+      isLive: false,
       currentRace: null,
       nextSession: null,
       lastSession: null,
@@ -260,5 +333,5 @@ export default function useRaceWeekendState() {
     // (isLivePhase / isFormation), so they must be listed. Without them the
     // mode never flipped to SESSION_LIVE when timing started arriving without
     // an accompanying phase change.
-  }, [session.phase, session.lap, calendar, raceControl, timing])
+  }, [session.phase, session.lap, calendar, raceControl, timing, sessionMeta])
 }

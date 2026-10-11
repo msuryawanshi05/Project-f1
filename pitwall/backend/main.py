@@ -99,7 +99,14 @@ async def lifespan(app: FastAPI):
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="PITWALL Backend", version="0.4.0", lifespan=lifespan)
 
-_cors_env = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:4173")
+# 127.0.0.1 and localhost are different origins to the browser, and the dev
+# server is reachable on both. Omitting the 127.0.0.1 forms meant opening the
+# app on 127.0.0.1:5173 had every backend call blocked by CORS.
+_cors_env = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:4173,"
+    "http://127.0.0.1:5173,http://127.0.0.1:4173",
+)
 _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
 
 app.add_middleware(
@@ -152,6 +159,16 @@ async def _resolve_openf1_session(client: httpx.AsyncClient, year: int) -> dict:
         except (ValueError, TypeError):
             return None
 
+    # Grace past the scheduled end before a session stops counting as running.
+    #
+    # This was two hours, which is why a finished race stayed "live": the
+    # Singapore GP ended at 14:00 UTC and the endpoint still reported
+    # is_live=true at 14:54. Red-flagged sessions do overrun, but the right
+    # signal for that is the SignalR feed still streaming — which the client
+    # already has and weighs above this flag (see utils/sessionLifecycle.js).
+    # A generous clock window is a bad proxy for "probably still going".
+    live_grace = timedelta(minutes=15)
+
     live, past = None, []
     for sess in sessions:
         if not isinstance(sess, dict) or sess.get("is_cancelled"):
@@ -159,9 +176,7 @@ async def _resolve_openf1_session(client: httpx.AsyncClient, year: int) -> dict:
         start_dt, end_dt = _dt(sess.get("date_start")), _dt(sess.get("date_end"))
         if start_dt is None:
             continue
-        # Treat a session as live for a while past its scheduled end — red flags
-        # and delays routinely push a session well beyond date_end.
-        if end_dt is not None and start_dt <= now <= end_dt + timedelta(hours=2):
+        if end_dt is not None and start_dt <= now <= end_dt + live_grace:
             live = sess
             break
         if start_dt <= now:
@@ -171,12 +186,20 @@ async def _resolve_openf1_session(client: httpx.AsyncClient, year: int) -> dict:
     if not chosen:
         return {}
 
+    end_dt = _dt(chosen.get("date_end"))
+    seconds_since_end = (now - end_dt).total_seconds() if end_dt else None
+
     return {
         "session_key":        chosen.get("session_key"),
         "session_name":       chosen.get("session_name"),
         "session_type":       chosen.get("session_type"),
         "circuit_short_name": chosen.get("circuit_short_name"),
+        # Both bounds are returned so the client can resolve the session
+        # lifecycle itself (running / provisional / results pending) instead of
+        # inferring it from stale timing rows.
         "date_start":         chosen.get("date_start"),
+        "date_end":           chosen.get("date_end"),
+        "seconds_since_end":  seconds_since_end,
         "is_live":            live is not None,
     }
 
@@ -194,7 +217,12 @@ async def current_session():
       session_key          — OpenF1 session key, or None. Pass this to OpenF1.
       openf1_session_key   — same value, named explicitly.
       round                — Jolpica round number. NOT an OpenF1 session key.
-      session_name, session_type, circuit, circuit_name, race_name, year, is_live
+      date_start/date_end  — scheduled bounds of the resolved session (ISO).
+      seconds_since_end    — negative while the session is yet to end.
+      is_live              — within [date_start, date_end + 15 min]. ADVISORY:
+                             the client weighs the live SignalR phase above this
+                             so an overrunning red-flagged session is handled.
+      session_name, session_type, circuit, circuit_name, race_name, year
     """
     today = date.today()
     year = today.year
@@ -219,6 +247,9 @@ async def current_session():
                 "circuit":            None,
                 "year":               year,
                 "is_live":            openf1.get("is_live", False),
+                "date_start":         openf1.get("date_start"),
+                "date_end":           openf1.get("date_end"),
+                "seconds_since_end":  openf1.get("seconds_since_end"),
                 "source":             "openf1_only",
                 "error":              str(exc),
             }
@@ -279,6 +310,9 @@ async def current_session():
         "race_name":          matched.get("raceName"),
         "year":               year,
         "is_live":            openf1.get("is_live", False),
+        "date_start":         openf1.get("date_start"),
+        "date_end":           openf1.get("date_end"),
+        "seconds_since_end":  openf1.get("seconds_since_end"),
         "source":             "jolpica+openf1" if openf1.get("session_key") else "jolpica",
     }
 

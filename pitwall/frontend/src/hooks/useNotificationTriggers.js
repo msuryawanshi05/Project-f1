@@ -60,7 +60,9 @@ export default function useNotificationTriggers() {
   // DEV-only: expose store for browser console debugging
   useEffect(() => {
     if (import.meta.env.DEV) {
-      globalThis.__pitwall_store = useF1Store.getState()
+      // The store itself, not a one-shot snapshot — a snapshot taken at mount
+      // is frozen and useless for inspecting live state from the console.
+      globalThis.__pitwall_store = useF1Store
     }
   }, [])
 

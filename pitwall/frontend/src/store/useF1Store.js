@@ -58,6 +58,12 @@ const useF1Store = create((set, get) => ({
   // OpenF1 answers with 404 — that silently broke every OpenF1-backed panel.
   currentSessionKey: null,
   currentRound: null,       // Jolpica round number — never an OpenF1 key
+
+  // Scheduled bounds of the resolved session, from /api/current-session.
+  // Needed so the session lifecycle (running / provisional / results pending)
+  // can be resolved from the clock + feed rather than inferred from stale
+  // timing rows — see utils/sessionLifecycle.js.
+  sessionMeta: { dateStart: null, dateEnd: null, isLive: false },
   // ── Phase 6: Per-driver best lap times (for qualifying mode) ────────────────
   bestLaps: {},       // { [driverNumber]: bestLapSeconds }
 
@@ -277,6 +283,16 @@ const useF1Store = create((set, get) => ({
   setCurrentSessionKey: (key) => set({ currentSessionKey: key }),
 
   setCurrentRound: (round) => set({ currentRound: round }),
+
+  setSessionMeta: (meta) =>
+    set((state) => {
+      const next = { ...state.sessionMeta, ...meta }
+      const cur = state.sessionMeta
+      if (next.dateStart === cur.dateStart && next.dateEnd === cur.dateEnd && next.isLive === cur.isLive) {
+        return state
+      }
+      return { sessionMeta: next }
+    }),
 
   setQualifying: (partial) =>
     set((state) => {

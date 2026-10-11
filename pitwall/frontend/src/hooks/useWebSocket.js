@@ -52,13 +52,34 @@ export function useWebSocket() {
     addRaceControl,
     setCurrentSessionKey,
     setCurrentRound,
+    setSessionMeta,
     setQualifying,
     updateBestLap,
     updateGapHistory,
     resetLiveSession,
   } = useF1Store()
 
-  // ── Route a parsed message into the store ─────────────────────────────────
+  // ── Race-control freshness ───────────────────────────────────────────────────
+// A "FORMATION LAP" / "START PROCEDURE" line means the session is starting only
+// if it is RECENT. These scans used to cover all 50 retained messages with no
+// time bound, so an hour-old formation-lap message kept forcing phase to LIVE —
+// overwriting the backend's correct FINISHED and leaving a completed race
+// advertised as live timing. This is the same defect already fixed in
+// StatusBar, BroadcastBanner and useRaceWeekendState; this copy was the one
+// that corrupted the phase at its source.
+const RC_FRESH_MS = 10 * 60 * 1000
+
+function hasRecentStartProcedure(messages) {
+  const cutoff = Date.now() - RC_FRESH_MS
+  return messages.some((m) => {
+    const ts = m.time ? Date.parse(m.time) : NaN
+    if (!Number.isFinite(ts) || ts < cutoff) return false
+    const t = (m.message || m.msg || '').toUpperCase()
+    return t.includes('FORMATION LAP') || t.includes('START PROCEDURE')
+  })
+}
+
+// ── Route a parsed message into the store ─────────────────────────────────
   function routeMessageToStore(msg) {
     const { type, data } = msg
 
@@ -71,10 +92,10 @@ export function useWebSocket() {
       case 'session': {
         const cur = useF1Store.getState().session
         const raceControlMsgs = useF1Store.getState().raceControl
-        const isFormationOrActive = raceControlMsgs.some(m => {
-          const t = (m.message || m.msg || '').toUpperCase()
-          return t.includes('FORMATION LAP') || t.includes('START PROCEDURE')
-        })
+        // A finished session is never "starting". Without this guard a stale
+        // formation-lap message outranked the backend's FINISHED phase.
+        const isFinished = data.phase === 'FINISHED'
+        const isFormationOrActive = !isFinished && hasRecentStartProcedure(raceControlMsgs)
         const isPre = data.phase === 'PRE' && !isFormationOrActive
         const incomingPhase = isFormationOrActive ? 'LIVE' : (data.phase || cur.phase)
         setSession({
@@ -168,13 +189,12 @@ export function useWebSocket() {
       case 'race_control':
         if (Array.isArray(data.messages)) {
           data.messages.forEach(addRaceControl)
-          const hasFormation = data.messages.some(m => {
-            const t = (m.message || m.msg || '').toUpperCase()
-            return t.includes('FORMATION LAP') || t.includes('START PROCEDURE')
-          })
+          const hasFormation = hasRecentStartProcedure(data.messages)
           if (hasFormation) {
             const cur = useF1Store.getState().session
-            if (cur.phase !== 'LIVE') {
+            // Once the session has finished, nothing in race control should
+            // push it back to LIVE.
+            if (cur.phase !== 'LIVE' && cur.phase !== 'FINISHED') {
               setSession({
                 ...cur,
                 name: cur.name && cur.name !== 'Unknown' ? cur.name : 'FORMATION LAP',
@@ -194,12 +214,20 @@ export function useWebSocket() {
         break
       case 'lap_count': {
         const curSession = useF1Store.getState().session
-        const isLive = Boolean(data.current && data.current >= 1 && curSession.phase !== 'PRE')
+        // A lap count only ever PROMOTES a not-yet-started session to LIVE.
+        //
+        // This used to read `phase !== 'PRE'` and then force LIVE, so once the
+        // race was over the retained "lap 62 of 62" message flipped FINISHED
+        // straight back to LIVE on every reconnect — the cached envelopes are
+        // replayed in arbitrary order, so this reliably won the race against
+        // the correct session envelope. It is why a completed Grand Prix went
+        // on being advertised as live timing.
+        const shouldPromote = Boolean(data.current && data.current >= 1 && curSession.phase === 'PRE')
         setSession({
           ...curSession,
           lap: data.current ?? curSession.lap,
           total_laps: data.total || curSession.total_laps,
-          phase: isLive ? 'LIVE' : curSession.phase,
+          phase: shouldPromote ? 'LIVE' : curSession.phase,
         })
         break
       }
@@ -222,6 +250,11 @@ export function useWebSocket() {
       const json = await res.json()
       if (json.session_key != null) setCurrentSessionKey(json.session_key)
       if (json.round != null) setCurrentRound(json.round)
+      setSessionMeta({
+        dateStart: json.date_start ?? null,
+        dateEnd: json.date_end ?? null,
+        isLive: Boolean(json.is_live),
+      })
     } catch (_e) {
       // Network error fetching session — non-critical, silent in production
     }
@@ -291,6 +324,16 @@ export function useWebSocket() {
     fetchCurrentSession()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionName])
+
+  // A session ends while the page is open. Without a periodic re-resolve the
+  // client keeps the pre-chequered schedule and never learns the race is over
+  // — which is half of why a finished session stayed on screen. Five minutes
+  // is well inside the 30-minute provisional window.
+  useEffect(() => {
+    const id = setInterval(fetchCurrentSession, 5 * 60 * 1000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     connect()

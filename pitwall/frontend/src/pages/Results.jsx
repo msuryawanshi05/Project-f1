@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
@@ -144,37 +144,115 @@ export default function Results() {
 
   const now       = new Date()
   const pastRaces = calendar.filter((r) => getRaceStatus(r, now).isDone)
-  const ongoingRace = calendar.find((r) => getRaceStatus(r, now).isOngoing)
+  // Race-day ONGOING from getRaceStatus stays true until midnight, so an hour
+  // after the chequered flag the page still claimed the race was in progress.
+  // `liveRound` (from the session lifecycle, defined below) is the real test;
+  // this keeps the weekend-level notion for the banner only.
+  const raceDayRace = calendar.find((r) => getRaceStatus(r, now).isOngoing)
   const nextUpcoming = calendar.find((r) => !getRaceStatus(r, now).isDone && !getRaceStatus(r, now).isOngoing)
 
-  const { currentRace } = useRaceWeekendState()
-  const nextRace = ongoingRace ?? currentRace ?? nextUpcoming ?? null
+  const weekendState = useRaceWeekendState()
+  const { currentRace } = weekendState
+  const nextRace = currentRace ?? raceDayRace ?? nextUpcoming ?? null
 
-  async function loadRound(round) {
-    if (selected === round) { setSelected(null); setShowStory(false); return }
+  // The only round that may render as "in progress" is the one the lifecycle
+  // reports as actually live. Race-day-based ONGOING is not good enough: it
+  // stays true until midnight.
+  const liveRound = weekendState.isLive ? weekendState.currentRace?.round ?? null : null
+  const ongoingRace = liveRound != null
+    ? calendar.find((r) => r.round === liveRound) ?? null
+    : null
+
+  // Fetch a round's classification. `toggle` is false for the automatic default
+  // selection, so landing on the page never immediately closes the panel.
+  const fetchRound = useCallback(async (round, { toggle = true } = {}) => {
+    if (toggle && selected === round) { setSelected(null); setShowStory(false); return }
     setSelected(round); setShowStory(false)
 
     const race = calendar.find((r) => r.round === round)
-    const statusInfo = getRaceStatus(race, now)
-    if (statusInfo.isOngoing) {
+    const statusInfo = getRaceStatus(race, new Date())
+    if (round === liveRound) {
       setResults(round, { ongoing: true, raceName: race?.raceName ?? `Round ${round}`, round })
       return
     }
 
-    if (results[round]) return
+    if (results[round] && !results[round].pending) return
     setLoading(round); setError(null)
     try {
       const res  = await fetch(`${BASE}/${round}/results.json`)
       const data = await res.json()
       const races = data?.MRData?.RaceTable?.Races
-      if (!races?.length) { setResults(round, { empty: true }); return }
+      if (!races?.length) {
+        // Distinguish "hasn't been run" from "run, but the classification is
+        // not published yet". Jolpica lags the chequered flag by minutes to
+        // hours (round 17 returned total=0 an hour afterwards), and rendering
+        // the same empty message for both reads as a broken table.
+        const started = statusInfo.raceStart ? new Date() >= statusInfo.raceStart : statusInfo.isDone
+        const ranAlready = statusInfo.isDone || started
+        setResults(round, ranAlready
+          ? { pending: true, raceName: race?.raceName ?? `Round ${round}`, round }
+          : { empty: true, raceName: race?.raceName ?? `Round ${round}`, round })
+        return
+      }
       setResults(round, races[0])
     } catch (e) {
       setError(`R${round}: ${e.message}`)
     } finally {
       setLoading(null)
     }
+  }, [selected, calendar, results, setResults])
+
+  function loadRound(round) {
+    return fetchRound(round, { toggle: true })
   }
+
+  // ── Default selection ────────────────────────────────────────────────────
+  // The page used to land with nothing selected, so the most common intent —
+  // "how did the race that just happened go?" — took an extra click. Default
+  // to the ongoing round if there is one, else the most recent completed round.
+  const didAutoSelect = useRef(false)
+
+  // "Most recent" must mean most recently STARTED, not most recently "done".
+  // getRaceStatus reports a race-day round as ONGOING (not done) until
+  // midnight, so keying off pastRaces skipped the race that had just run and
+  // defaulted to the previous round instead.
+  const latestStartedRound = [...calendar]
+    .filter((r) => {
+      const st = getRaceStatus(r, now)
+      return st.raceStart ? now >= st.raceStart : st.isDone
+    })
+    .sort((a, b) => Number(a.round) - Number(b.round))
+    .at(-1)?.round ?? null
+
+  const defaultRound = ongoingRace?.round ?? latestStartedRound
+
+  useEffect(() => {
+    if (didAutoSelect.current) return
+    if (selected != null) { didAutoSelect.current = true; return }
+    if (defaultRound == null) return
+    didAutoSelect.current = true
+    fetchRound(defaultRound, { toggle: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultRound])
+
+  // A pending classification should resolve itself without a reload.
+  useEffect(() => {
+    if (selected == null) return
+    if (!results[selected]?.pending) return
+    const id = setInterval(() => fetchRound(selected, { toggle: false }), 3 * 60 * 1000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, results[selected]?.pending])
+
+  // Bring the selected round into view. The strip scrolls horizontally and the
+  // most recent round lives off its right edge, so auto-selecting it without
+  // this leaves the page looking like nothing was selected.
+  const stripRef = useRef(null)
+  useEffect(() => {
+    if (selected == null || !stripRef.current) return
+    const el = stripRef.current.querySelector(`[data-round="${selected}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }, [selected])
 
   const selectedData = selected ? results[selected] : null
 
@@ -187,7 +265,9 @@ export default function Results() {
           Race Results
         </h1>
         <div className="font-mono text-xs mt-1 text-pitwall-dim">
-          {pastRaces.length} completed rounds{ongoingRace ? ` · ${ongoingRace.raceName} in progress` : ''}
+          {pastRaces.length} completed rounds
+          {ongoingRace ? ` · ${ongoingRace.raceName} in progress` : ''}
+          {!ongoingRace && selectedData?.pending ? ` · ${selectedData.raceName} awaiting classification` : ''}
         </div>
       </div>
 
@@ -200,7 +280,7 @@ export default function Results() {
                 <span className="w-1.5 h-1.5 rounded-full bg-status-green animate-pulse" />
                 ONGOING GP
               </>
-            ) : 'Next GP'}
+            ) : nextRace && String(nextRace.round) === String(latestStartedRound) ? 'Latest GP' : 'Next GP'}
           </span>
           <span className="font-display font-bold text-sm tracking-wider text-pitwall-text-strong flex-1 truncate uppercase flex items-center gap-2">
             <span className="font-mono font-bold text-[10px] bg-pitwall-surface border border-pitwall-border px-1.5 py-0.5 rounded-sm text-status-red">
@@ -220,18 +300,23 @@ export default function Results() {
 
       {/* Race selector tabs */}
       <div className="border-b border-pitwall-border bg-pitwall-surface">
-        <div className="flex gap-0 overflow-x-auto divide-x divide-pitwall-border/40">
+        <div ref={stripRef} className="flex gap-0 overflow-x-auto divide-x divide-pitwall-border/40">
           {calendar.map((race) => {
             const statusInfo = getRaceStatus(race, now)
             const isPast     = statusInfo.isDone
-            const isOngoing  = statusInfo.isOngoing
+            // Clickable covers "has happened or is happening today"; the LIVE
+            // badge is narrower and means the session is genuinely running, so
+            // a finished race stops being badged LIVE straight away.
+            const isSelectable = statusInfo.isDone || statusInfo.isOngoing
+            const isOngoing  = race.round === liveRound
             const isSelec    = selected === race.round
             const country    = race.Circuit?.Location?.country ?? ''
-            const isClickable = isPast || isOngoing
+            const isClickable = isSelectable
 
             return (
               <button
                 key={race.round}
+                data-round={race.round}
                 onClick={() => isClickable && loadRound(race.round)}
                 disabled={!isClickable}
                 className={`flex-shrink-0 px-5 py-3 text-left transition-all min-w-[120px] select-none ${
@@ -303,7 +388,30 @@ export default function Results() {
         </div>
       )}
 
-      {selectedData && !selectedData.empty && !selectedData.ongoing && (
+      {/* Ran, but no official classification published yet. */}
+      {selectedData?.pending && (
+        <div className="px-6 py-8 bg-carbon flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-hidden="true" />
+            <span className="font-display text-[11px] font-bold tracking-widest uppercase text-amber-500 dark:text-amber-400">
+              Awaiting official classification
+            </span>
+          </div>
+          <div className="font-mono text-xs text-pitwall-dim max-w-md leading-relaxed">
+            {selectedData.raceName} has finished, but the official classification has not been
+            published yet. It usually appears within a few hours of the chequered flag — this
+            panel refreshes itself every few minutes.
+          </div>
+          <Link
+            to="/live"
+            className="font-mono text-[10px] tracking-widest uppercase underline text-pitwall-ghost hover:text-pitwall-text-strong w-fit mt-1"
+          >
+            See the provisional timing
+          </Link>
+        </div>
+      )}
+
+      {selectedData && !selectedData.empty && !selectedData.ongoing && !selectedData.pending && (
         <div className="px-6 py-5 flex flex-col gap-6">
 
           {/* ── Podium ─────────────────────────────────────────── */}
