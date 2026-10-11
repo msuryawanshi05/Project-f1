@@ -18,7 +18,8 @@ import { useEffect, useState } from 'react'
  */
 
 const JOLPICA = 'https://api.jolpi.ca/ergast/f1'
-const OPENF1_PROXY = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000') + '/api/openf1'
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+const OPENF1_PROXY = `${API_BASE}/api/openf1`
 const CACHE_TTL = 6 * 60 * 60 * 1000 // 6h — career stats change at most weekly
 const SEASON = new Date().getFullYear()
 
@@ -44,16 +45,17 @@ function writeCache(key, data) {
 
 // ── Request throttle ────────────────────────────────────────────────────────
 // Jolpica rate-limits bursts: measured on 2026-10-11, ~12 concurrent requests
-// succeed and the rest return 429 (with no Retry-After or X-RateLimit headers
-// to go on). A full career profile is 28 requests for a 20-season driver, so
-// firing them all at once reliably trips the limit.
+// succeed and the rest return 429 (no Retry-After or X-RateLimit headers to go
+// on). Career aggregation — by far the heaviest caller, ~28 requests — now
+// happens on the backend behind a cache, so what remains here is the teammate
+// head-to-head at roughly seven requests, comfortably inside the limit.
 //
-// This matters more than it looks. The first version of this hook fanned out
-// with Promise.all and swallowed failures into `null`, which turned a 429 into
-// *plausible but wrong* career stats — Lewis Hamilton rendered as 2 titles and
-// 7 seasons instead of 7 and 20, with no indication anything had gone wrong.
-// Silently wrong output is worse than a visible gap, so: cap concurrency,
-// retry 429s with backoff, and report what could not be fetched.
+// The pool stays because the limit still exists and because the failure mode it
+// guards against is the dangerous one: the first version of the career hook
+// fanned out with Promise.all and swallowed failures into `null`, turning a 429
+// into *plausible but wrong* stats — Lewis Hamilton as 2 titles over 7 seasons
+// instead of 7 over 20, with nothing to indicate it. A visible gap beats a
+// wrong number.
 const MAX_CONCURRENT = 4
 const RETRY_DELAYS_MS = [600, 1500, 3200]
 
@@ -210,6 +212,23 @@ export function useSeasonDrivers(year = SEASON) {
 }
 
 // ── One driver's full profile ───────────────────────────────────────────────
+/**
+ * Career totals + per-season record, from the backend.
+ *
+ * This used to aggregate in the browser: ~28 Jolpica requests per profile (six
+ * count queries plus one standings call per season, because Jolpica rejects
+ * /drivers/{id}/driverstandings without a season in the path). Jolpica limits
+ * by rate, so a 20-season driver tripped 429s on nearly every view and the
+ * "could not fetch" notice fired in normal use.
+ *
+ * The backend now does that fan-out once, paced inside the rate limit, and
+ * caches per driver — 24h for a driver with no current-season entry, 30 min
+ * for an active one. The browser makes one request.
+ *
+ * The honesty contract is unchanged and still enforced server-side: partial
+ * data yields null totals rather than a wrong number, and `missing` names what
+ * could not be fetched.
+ */
 export function useDriverProfile(driverId) {
   const [state, setState] = useState({ data: null, loading: true, error: null })
 
@@ -219,128 +238,36 @@ export function useDriverProfile(driverId) {
       return
     }
 
-    const cacheKey = `pitwall_driver_${driverId}_${SEASON}`
+    // A short client-side cache as well, so tabbing between drivers and back
+    // is instant and does not re-hit the backend.
+    const cacheKey = `pitwall_career_${driverId}_${SEASON}`
     const cached = readCache(cacheKey)
     if (cached) setState({ data: cached, loading: false, error: null })
 
     const ctrl = new AbortController()
-    const { signal } = ctrl
     let cancelled = false
 
-    async function load() {
-      try {
-        const [profileJson, seasonsJson] = await Promise.all([
-          jget(`/drivers/${driverId}.json`, signal),
-          jget(`/drivers/${driverId}/seasons.json?limit=100`, signal),
-        ])
-
-        const profile = profileJson?.MRData?.DriverTable?.Drivers?.[0]
-        if (!profile) throw new Error('Driver not found')
-
-        const seasons = (seasonsJson?.MRData?.SeasonTable?.Seasons ?? []).map((s) => s.season)
-
-        // Career totals — six count-only queries, through the pool.
-        const counts = await mapPool([
-          `/drivers/${driverId}/results.json?limit=1`,
-          `/drivers/${driverId}/results/1.json?limit=1`,
-          `/drivers/${driverId}/results/2.json?limit=1`,
-          `/drivers/${driverId}/results/3.json?limit=1`,
-          `/drivers/${driverId}/qualifying/1.json?limit=1`,
-          `/drivers/${driverId}/fastest/1/results.json?limit=1`,
-        ], (path) => jcount(path, signal))
-        const [races, wins, p2, p3, poles, fastestLaps] = counts
-
-        // Per-season standings — one call per season is the only shape Jolpica
-        // accepts, so this is where a long career costs the most requests.
-        let seasonFailures = 0
-        const seasonRows = await mapPool(seasons, async (season) => {
-          try {
-            const json = await jget(`/${season}/drivers/${driverId}/driverstandings.json`, signal)
-            const s = json?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.[0]
-            // No standing for a season is legitimate (e.g. a reserve who never
-            // scored), and distinct from a failed request.
-            if (!s) return null
-            const c = s.Constructors?.[s.Constructors.length - 1]
-            return {
-              season,
-              position: Number(s.position) || null,
-              points: Number(s.points) || 0,
-              wins: Number(s.wins) || 0,
-              team: c?.name ?? null,
-              teamId: c?.constructorId ?? null,
-            }
-          } catch (e) {
-            if (e.name === 'AbortError') throw e
-            seasonFailures++
-            return null
-          }
-        })
-
-        const careerSeasons = seasonRows.filter(Boolean).sort((a, b) => Number(a.season) - Number(b.season))
-        const current = careerSeasons.find((s) => s.season === String(SEASON)) ?? null
-
-        // A partial season list cannot produce a title count — a missing season
-        // is indistinguishable from a non-title season, so the total would be
-        // wrong rather than merely incomplete. Report null and say so.
-        const seasonsComplete = seasonFailures === 0
-        const championships = seasonsComplete
-          ? careerSeasons.filter((s) => s.position === 1).length
-          : null
-
-        const podiums = wins.ok && p2.ok && p3.ok
-          ? wins.value + p2.value + p3.value
-          : null
-
-        const missing = [
-          !races.ok && 'starts',
-          !wins.ok && 'wins',
-          podiums == null && 'podiums',
-          !poles.ok && 'poles',
-          !fastestLaps.ok && 'fastest laps',
-          !seasonsComplete && 'championships',
-        ].filter(Boolean)
-
-        const data = {
-          profile,
-          seasons: careerSeasons,
-          current,
-          career: {
-            races: races.value,
-            wins: wins.value,
-            podiums,
-            poles: poles.value,
-            fastestLaps: fastestLaps.value,
-            championships,
-            // Only a complete season list gives a trustworthy season count.
-            seasonCount: seasonsComplete ? careerSeasons.length : null,
-          },
-          // Surfaced in the UI so a rate-limited load reads as incomplete
-          // rather than as fact.
-          partial: missing.length > 0,
-          missing,
-          // Count of season requests that actually FAILED. Not the same as
-          // `expectedSeasons - seasons.length`: a driver can legitimately
-          // appear in a season with no classified standing (Antonelli's 2024
-          // is an FP1 outing and returns zero standings lists), and warning
-          // about that would be crying wolf.
-          seasonFailures,
-          expectedSeasons: seasons.length,
-        }
-
+    fetch(`${API_BASE}/api/driver/${encodeURIComponent(driverId)}/career`, { signal: ctrl.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then((json) => {
         if (cancelled) return
-        writeCache(cacheKey, data)
-        setState({ data, loading: false, error: null })
-      } catch (e) {
+        if (json?.error) throw new Error(json.error)
+        // Only cache a complete answer — a partial one should be retried.
+        if (!json.partial) writeCache(cacheKey, json)
+        setState({ data: json, loading: false, error: null })
+      })
+      .catch((e) => {
         if (cancelled || e.name === 'AbortError') return
         setState((prev) => ({
           data: prev.data,
           loading: false,
           error: prev.data ? null : e.message,
         }))
-      }
-    }
+      })
 
-    load()
     return () => { cancelled = true; ctrl.abort() }
   }, [driverId])
 

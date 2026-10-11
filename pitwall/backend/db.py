@@ -19,7 +19,7 @@ DB_PATH = Path(__file__).parent / "pitwall_cache.db"
 
 
 async def init_db() -> None:
-    """Create the session_cache table if it doesn't exist. Call on startup."""
+    """Create the cache tables if they don't exist. Call on startup."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS session_cache (
@@ -28,8 +28,55 @@ async def init_db() -> None:
                 updated_at REAL NOT NULL
             )
         """)
+        # Separate from session_cache: that table is cleared wholesale when a
+        # session ends, which would throw away long-lived reference data such
+        # as career statistics. This one carries its own per-row expiry.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS api_cache (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                expires_at REAL NOT NULL
+            )
+        """)
         await db.commit()
     logger.info("DB initialised at %s", DB_PATH)
+
+
+async def api_cache_get(key: str) -> dict | None:
+    """Return a cached payload for `key`, or None if absent or expired."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT value FROM api_cache WHERE key = ? AND expires_at > ?",
+                (key, time.time()),
+            ) as cursor:
+                row = await cursor.fetchone()
+        return json.loads(row[0]) if row else None
+    except Exception:
+        logger.exception("api_cache_get failed for key=%r", key)
+        return None
+
+
+async def api_cache_set(key: str, value: dict, ttl_seconds: float) -> None:
+    """Store `value` under `key` for `ttl_seconds`."""
+    try:
+        payload = json.dumps(value, default=str)
+        expires = time.time() + ttl_seconds
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                INSERT INTO api_cache (key, value, expires_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value      = excluded.value,
+                    expires_at = excluded.expires_at
+                """,
+                (key, payload, expires),
+            )
+            await db.execute("DELETE FROM api_cache WHERE expires_at < ?", (time.time(),))
+            await db.commit()
+    except Exception:
+        logger.exception("api_cache_set failed for key=%r", key)
 
 
 async def cache_set(key: str, value: dict) -> None:

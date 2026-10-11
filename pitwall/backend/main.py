@@ -24,7 +24,8 @@ import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from db import cache_get_all, cache_prune_expired, cache_set, init_db
+from db import (api_cache_get, api_cache_set, cache_get_all,
+                cache_prune_expired, cache_set, init_db)
 from scheduler import start_scheduler
 from signalr_client import get_client
 
@@ -375,6 +376,235 @@ async def openf1_proxy(path: str, request: Request):
                 status_code=502,
                 media_type="application/json",
             )
+
+
+# ── Driver career statistics ──────────────────────────────────────────────────
+
+JOLPICA_BASE = "https://api.jolpi.ca/ergast/f1"
+
+# Jolpica rate-limits bursts: measured 2026-10-11, roughly 12 concurrent
+# requests succeed and the rest return 429, with no Retry-After or
+# X-RateLimit headers to pace against.
+#
+# A full career profile is ~28 requests for a 20-season driver. Issuing them
+# from the browser meant every profile view risked tripping the limit, and the
+# page showed its "could not fetch" notice in normal use. Doing it here instead
+# means ONE origin making the calls, with a real cache in front, so the limit is
+# hit rarely rather than routinely.
+_JOLPICA_SEM = asyncio.Semaphore(4)
+_JOLPICA_RETRY_DELAYS = (0.8, 2.0, 4.0, 7.0)
+
+# Jolpica limits by RATE, not just concurrency: a semaphore of 4 still lets
+# four requests leave back to back, and a 20-season profile then trips 429s
+# mid-run (observed 2023/2024/2025 all rejected in the same 200ms window).
+# Pacing the START of each request keeps a cold profile inside the limit, so
+# the retry path stays an exception rather than the norm.
+_JOLPICA_MIN_INTERVAL = 0.22   # seconds between request starts (~4.5 req/s)
+_jolpica_gate = asyncio.Lock()
+_jolpica_next_at = 0.0
+
+
+async def _jolpica_pace() -> None:
+    """Block until this caller's turn in the global request schedule."""
+    global _jolpica_next_at
+    async with _jolpica_gate:
+        now = asyncio.get_running_loop().time()
+        wait = max(0.0, _jolpica_next_at - now)
+        _jolpica_next_at = max(now, _jolpica_next_at) + _JOLPICA_MIN_INTERVAL
+    if wait:
+        await asyncio.sleep(wait)
+
+CAREER_TTL_HISTORIC = 24 * 3600   # a retired driver's totals never change
+CAREER_TTL_CURRENT = 30 * 60      # an active driver's do, every race weekend
+
+
+async def _jolpica_get(client: httpx.AsyncClient, path: str) -> dict | None:
+    """GET a Jolpica path with concurrency capped and 429/5xx backoff."""
+    async with _JOLPICA_SEM:
+        for attempt in range(len(_JOLPICA_RETRY_DELAYS) + 1):
+            await _jolpica_pace()
+            try:
+                resp = await client.get(f"{JOLPICA_BASE}{path}")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Jolpica %s transport error: %s", path, exc)
+                if attempt >= len(_JOLPICA_RETRY_DELAYS):
+                    return None
+                await asyncio.sleep(_JOLPICA_RETRY_DELAYS[attempt])
+                continue
+
+            if resp.status_code == 200:
+                try:
+                    return resp.json()
+                except Exception:  # noqa: BLE001
+                    return None
+
+            transient = resp.status_code == 429 or resp.status_code >= 500
+            if not transient or attempt >= len(_JOLPICA_RETRY_DELAYS):
+                logger.debug("Jolpica %s -> HTTP %d", path, resp.status_code)
+                return None
+
+            retry_after = resp.headers.get("retry-after")
+            try:
+                delay = float(retry_after) if retry_after else _JOLPICA_RETRY_DELAYS[attempt]
+            except (TypeError, ValueError):
+                delay = _JOLPICA_RETRY_DELAYS[attempt]
+            await asyncio.sleep(delay)
+    return None
+
+
+async def _jolpica_count(client: httpx.AsyncClient, path: str) -> tuple[int | None, bool]:
+    """
+    Count-only query: read MRData.total instead of paginating the rows.
+
+    Returns (value, ok). `ok` distinguishes a genuine zero from a failed
+    request — they must never render the same.
+    """
+    data = await _jolpica_get(client, path)
+    if not data:
+        return None, False
+    try:
+        return int(data["MRData"]["total"]), True
+    except (KeyError, TypeError, ValueError):
+        return None, False
+
+
+@app.get("/api/driver/{driver_id}/career")
+async def driver_career(driver_id: str):
+    """
+    Aggregate one driver's career and per-season record.
+
+    Partial data yields null totals, never a wrong number. In particular a
+    championship count derived from an incomplete season list would be wrong
+    rather than merely incomplete (a missing season is indistinguishable from a
+    non-title season), so it is reported as null with `partial: true` and the
+    failures named in `missing`.
+    """
+    if not driver_id or len(driver_id) > 64 or "/" in driver_id:
+        return {"error": "invalid driver id"}
+
+    cache_key = f"career:{driver_id}"
+    cached = await api_cache_get(cache_key)
+    if cached:
+        cached["cached"] = True
+        return cached
+
+    season = date.today().year
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        profile_json, seasons_json = await asyncio.gather(
+            _jolpica_get(client, f"/drivers/{driver_id}.json"),
+            _jolpica_get(client, f"/drivers/{driver_id}/seasons.json?limit=100"),
+        )
+
+        drivers = (profile_json or {}).get("MRData", {}).get("DriverTable", {}).get("Drivers", [])
+        if not drivers:
+            return {"error": "driver not found", "driverId": driver_id}
+        profile = drivers[0]
+
+        seasons = [
+            s.get("season")
+            for s in (seasons_json or {}).get("MRData", {}).get("SeasonTable", {}).get("Seasons", [])
+            if s.get("season")
+        ]
+
+        count_paths = [
+            f"/drivers/{driver_id}/results.json?limit=1",
+            f"/drivers/{driver_id}/results/1.json?limit=1",
+            f"/drivers/{driver_id}/results/2.json?limit=1",
+            f"/drivers/{driver_id}/results/3.json?limit=1",
+            f"/drivers/{driver_id}/qualifying/1.json?limit=1",
+            f"/drivers/{driver_id}/fastest/1/results.json?limit=1",
+        ]
+        counts = await asyncio.gather(*(_jolpica_count(client, p) for p in count_paths))
+        (races, races_ok), (wins, wins_ok), (p2, p2_ok), (p3, p3_ok),             (poles, poles_ok), (fl, fl_ok) = counts
+
+        async def _season_row(year: str):
+            data = await _jolpica_get(client, f"/{year}/drivers/{driver_id}/driverstandings.json")
+            if data is None:
+                return year, None, True   # request failed
+            lists = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
+            if not lists or not lists[0].get("DriverStandings"):
+                # A season with no classified standing is legitimate — e.g. an
+                # FP1-only appearance. Not a failure.
+                return year, None, False
+            st = lists[0]["DriverStandings"][0]
+            ctors = st.get("Constructors") or []
+            ctor = ctors[-1] if ctors else {}
+            try:
+                position = int(st.get("position"))
+            except (TypeError, ValueError):
+                position = None
+            try:
+                points = float(st.get("points", 0))
+            except (TypeError, ValueError):
+                points = 0.0
+            try:
+                wins_n = int(st.get("wins", 0))
+            except (TypeError, ValueError):
+                wins_n = 0
+            return year, {
+                "season": year,
+                "position": position,
+                "points": points,
+                "wins": wins_n,
+                "team": ctor.get("name"),
+                "teamId": ctor.get("constructorId"),
+            }, False
+
+        season_results = await asyncio.gather(*(_season_row(y) for y in seasons))
+
+    rows = [row for _, row, _ in season_results if row]
+    season_failures = sum(1 for _, _, failed in season_results if failed)
+    rows.sort(key=lambda r: int(r["season"]))
+
+    current = next((r for r in rows if r["season"] == str(season)), None)
+
+    seasons_complete = season_failures == 0
+    championships = (
+        sum(1 for r in rows if r["position"] == 1) if seasons_complete else None
+    )
+    podiums = (wins + p2 + p3) if (wins_ok and p2_ok and p3_ok) else None
+
+    missing = [
+        label for ok, label in (
+            (races_ok, "starts"),
+            (wins_ok, "wins"),
+            (podiums is not None, "podiums"),
+            (poles_ok, "poles"),
+            (fl_ok, "fastest laps"),
+            (seasons_complete, "championships"),
+        ) if not ok
+    ]
+
+    payload = {
+        "driverId": driver_id,
+        "profile": profile,
+        "seasons": rows,
+        "current": current,
+        "career": {
+            "races": races,
+            "wins": wins,
+            "podiums": podiums,
+            "poles": poles,
+            "fastestLaps": fl,
+            "championships": championships,
+            "seasonCount": len(rows) if seasons_complete else None,
+        },
+        "partial": bool(missing),
+        "missing": missing,
+        "seasonFailures": season_failures,
+        "expectedSeasons": len(seasons),
+        "cached": False,
+    }
+
+    # Don't cache a partial answer for long — it should heal on the next view.
+    if missing:
+        ttl = 120.0
+    else:
+        ttl = CAREER_TTL_CURRENT if current else CAREER_TTL_HISTORIC
+    await api_cache_set(cache_key, payload, ttl)
+
+    return payload
 
 
 @app.websocket("/ws")
