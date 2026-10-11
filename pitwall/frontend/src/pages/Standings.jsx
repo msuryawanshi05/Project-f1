@@ -2,16 +2,19 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
 import teamsData from '../data/teams.json'
-import { getSafeTeamColour } from '../utils/driverUtils'
+import { teamColour } from '../utils/teamColours'
 import { AnimatedNumber } from '../components/ui/AnimatedNumber'
 
-const TEAM_COLOURS = teamsData.teamColours
-
-function getTeamColourByName(teamName) {
-  const hex = Object.entries(TEAM_COLOURS).find(([k]) =>
-    teamName?.toLowerCase().includes(k.toLowerCase())
-  )?.[1] ?? '#444444'
-  return getSafeTeamColour(hex)
+/**
+ * Team colour, from the shared table in utils/teamColours.
+ *
+ * Was a substring scan over teams.json plus the old luminance heuristic, which
+ * gave no contrast guarantee — Williams blue and Ferrari red both rendered
+ * below AA as driver names. `role` picks the accent (swatches, 3:1) or the
+ * text variant (codes and names, 4.5:1).
+ */
+function getTeamColourByName(teamName, role = 'accent') {
+  return teamColour(teamName, { role })
 }
 
 function teamSlug(name) {
@@ -50,7 +53,7 @@ function PointsBar({ points, max, colour }) {
 }
 
 // ── Driver row in standings ───────────────────────────────────────────────────
-function DriverStandingRow({ entry, maxPts, isLeader, isFav, teamColour }) {
+function DriverStandingRow({ entry, maxPts, isLeader, isFav, teamColour, teamTextColour }) {
   const d       = entry.Driver ?? {}
   const code    = d.code ?? d.driverId ?? '???'
   const teamName= entry.Constructors?.[0]?.name ?? '—'
@@ -77,8 +80,8 @@ function DriverStandingRow({ entry, maxPts, isLeader, isFav, teamColour }) {
       <div className="flex items-center gap-3 min-w-0">
         <div className="w-[3px] h-6 flex-shrink-0" style={{ backgroundColor: teamColour }} />
         <div className="flex items-baseline gap-1.5 min-w-0 truncate">
-          <span className="font-display font-extrabold text-sm tracking-widest" style={{ color: teamColour }}>{code}</span>
-          <span className="font-body text-xs truncate" style={{ color: teamColour }}>{d.familyName}</span>
+          <span className="font-display font-extrabold text-sm tracking-widest" style={{ color: teamTextColour ?? teamColour }}>{code}</span>
+          <span className="font-body text-xs truncate" style={{ color: teamTextColour ?? teamColour }}>{d.familyName}</span>
         </div>
       </div>
 
@@ -108,7 +111,8 @@ function DriverStandingRow({ entry, maxPts, isLeader, isFav, teamColour }) {
 // ── Constructor row ───────────────────────────────────────────────────────────
 function ConstructorRow({ entry, maxPts, isLeader }) {
   const teamName  = entry.Constructor?.name ?? '—'
-  const teamColour= getTeamColourByName(teamName)
+  const teamColour = getTeamColourByName(teamName, 'accent')
+  const teamTextColour = getTeamColourByName(teamName, 'text')
   const pts       = parseFloat(entry.points ?? 0)
   const slug      = teamSlug(teamName)
   const logoUrl   = `/team-logos/${slug}.svg`
@@ -223,7 +227,8 @@ export default function Standings() {
                 driverStandings.map((entry, i) => {
                   const dNum      = entry.Driver?.permanentNumber ?? ''
                   const teamName  = entry.Constructors?.[0]?.name ?? ''
-                  const teamColour= getTeamColourByName(teamName)
+                  const teamColour = getTeamColourByName(teamName, 'accent')
+                  const teamTextColour = getTeamColourByName(teamName, 'text')
                   const isFav     = settings.favouriteDrivers?.includes(dNum) || settings.favouriteDrivers?.includes(entry.Driver?.driverId)
                   return (
                     <DriverStandingRow
@@ -233,6 +238,7 @@ export default function Standings() {
                       isLeader={i === 0}
                       isFav={isFav}
                       teamColour={teamColour}
+                      teamTextColour={teamTextColour}
                     />
                   )
                 })

@@ -24,7 +24,11 @@ const DriverRow = memo(function DriverRow({
   driver,
   timing,
   tyre,
+  // Accent (the 4px bar, favourite glow) and text (the driver code) are
+  // different roles with different contrast thresholds: the code is 14px text
+  // and needs 4.5:1, the bar only needs 3:1 as a UI component.
   teamColour = '#444444',
+  teamTextColour,
   isFavourite = false,
   expanded = false,
   onExpand,
@@ -195,11 +199,11 @@ const DriverRow = memo(function DriverRow({
       <div
         key="drv"
         className={`flex items-center min-w-0 font-display font-extrabold ${isCompact ? 'text-xs' : 'text-[14px]'} uppercase pl-1`}
-        style={{ color: teamColour }}
+        style={{ color: teamTextColour ?? teamColour }}
       >
         {penalty && (
           <Tooltip content={penalty.message || `Penalty: ${penalty.label}`}>
-            <span className="inline-flex items-center justify-center font-mono font-black text-[9px] px-1 py-0.5 rounded leading-none flex-shrink-0 bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm animate-pulse mr-1">
+            <span className="inline-flex items-center justify-center font-mono font-black text-[9px] px-1 py-0.5 rounded leading-none flex-shrink-0 bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/40 shadow-sm animate-pulse mr-1">
               <span className="mr-0.5 text-[8px]">⚠️</span>
               {penalty.label}
             </span>
@@ -463,6 +467,7 @@ const DriverRow = memo(function DriverRow({
   prev.tyre?.stints?.length       === next.tyre?.stints?.length       &&
   prev.penalty?.label             === next.penalty?.label             &&
   prev.teamColour                 === next.teamColour                 &&
+  prev.teamTextColour             === next.teamTextColour             &&
   prev.isFavourite                === next.isFavourite                &&
   prev.isBattling                 === next.isBattling                 &&
   prev.expanded                   === next.expanded

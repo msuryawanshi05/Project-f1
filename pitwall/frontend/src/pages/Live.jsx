@@ -639,7 +639,7 @@ export default function Live() {
           className="flex items-center gap-2 px-4 py-1.5 border-b border-amber-500/40 bg-amber-500/10"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" aria-hidden="true" />
-          <span className="font-display text-[10px] font-bold tracking-widest uppercase text-amber-500 dark:text-amber-400">
+          <span className="font-display text-[10px] font-bold tracking-widest uppercase text-amber-700 dark:text-amber-400">
             {sessionStateLabel(SessionState.PROVISIONAL)}
           </span>
           <span className="font-mono text-[10px] text-pitwall-dim">
@@ -675,7 +675,7 @@ export default function Live() {
                   </span>
                 ) : null}
                 {isFormationLap ? (
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40 animate-pulse">
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/40 animate-pulse">
                     FORMATION LAP
                   </span>
                 ) : !isSessionActive && showStartingGrid ? (
@@ -762,7 +762,8 @@ export default function Live() {
                       const driverNum  = t?.driver_number ?? t?.number
                       const driver     = driversByNumber[driverNum] ?? { number: driverNum }
                       const tyre       = tyresByDriver[driverNum]
-                      const teamColour = getTeamColour(driverNum, drivers)
+                      const teamColour = getTeamColour(driverNum, drivers, 'accent')
+                      const teamTextColour = getTeamColour(driverNum, drivers, 'text')
                       const isFav      = settings.favouriteDrivers?.includes(String(driverNum))
                       const penalty    = penaltiesByDriver[String(driverNum)]
 
@@ -781,6 +782,7 @@ export default function Live() {
                             timing={t}
                             tyre={tyre}
                             teamColour={teamColour}
+                            teamTextColour={teamTextColour}
                             isFavourite={isFav}
                             expanded={expandedDriver === driverNum}
                             onExpand={() => handleExpand(driverNum)}

@@ -539,7 +539,7 @@ export default function TrackMap({ circuitData, compact = false, showStats = tru
           </span>
           <div className="flex items-center gap-2 min-w-0">
             <span className="font-mono text-sm font-bold flex-shrink-0"
-              style={{ color: '#e10600' }}>
+              style={{ color: 'var(--pw-red-text)' }}>
               {circuitData.lap_record}
             </span>
             <span className="font-mono text-xs truncate"

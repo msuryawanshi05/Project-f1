@@ -1,5 +1,6 @@
 import teamsData from '../data/teams.json'
 import drivers2026 from '../data/drivers2026.json'
+import { teamColour, rawColour, canonicalTeam } from './teamColours'
 
 /**
  * Get full driver object from store's drivers array by car number.
@@ -12,17 +13,34 @@ export function getDriver(driverNumber, drivers) {
  * Get team colour hex string.
  * Tries live drivers array first, falls back to static teams.json map.
  */
-export function getTeamColour(driverNumber, drivers) {
+/**
+ * Colour for a driver.
+ *
+ * @param {number|string} driverNumber
+ * @param {Array} drivers         live driver list (for team identification)
+ * @param {'accent'|'text'} role  'accent' for bars/dots/strokes (needs 3:1),
+ *                                'text' for driver codes and labels (4.5:1)
+ *
+ * Team-first, deliberately: the canonical per-mode variant from
+ * utils/teamColours beats the raw feed hex, because the feed sends the livery
+ * with no regard for the background it will be drawn on. A feed colour is only
+ * used for a team that is not on the table, and even then it is nudged until
+ * it is legible rather than rendered as given.
+ */
+export function getTeamColour(driverNumber, drivers, role = 'accent') {
   const driver = getDriver(driverNumber, drivers)
-  let hex = '#FFFFFF'
-  if (driver?.team_colour) {
-    hex = driver.team_colour
-    hex = hex.startsWith('#') ? hex : `#${hex}`
-  } else {
-    const teamName = teamsData.driverTeams[String(driverNumber)]
-    hex = teamsData.teamColours[teamName] ?? '#FFFFFF'
+  const teamName = driver?.team ?? teamsData.driverTeams[String(driverNumber)] ?? null
+
+  if (teamName && canonicalTeam(teamName)) {
+    return teamColour(teamName, { role })
   }
-  return getSafeTeamColour(hex)
+  if (driver?.team_colour) return rawColour(driver.team_colour, { role })
+  return teamColour(teamName, { role })
+}
+
+/** Colour for a team by name — standings, constructor views, charts. */
+export function getTeamColourByName(teamName, role = 'accent') {
+  return teamColour(teamName, { role })
 }
 
 /**
@@ -276,22 +294,20 @@ export function darkenColour(hex, factor = 0.7) {
  * Checks if the theme is currently in light mode and, if so, darkens bright/pale colors
  * to ensure dynamic contrast readability.
  */
-export function getSafeTeamColour(hex, context) {
-  if (!hex) return '#444444'
-  
-  // Try checking the html class first.
-  const isLightMode = typeof document !== 'undefined' && !document.documentElement.classList.contains('dark')
-  
-  if (isLightMode) {
-    const luminance = getLuminance(hex)
-    // If the color is very bright (e.g. Mercedes turquoise #27F4D2 or Sauber green or Haas white),
-    // we want to darken it to ensure proper contrast.
-    if (luminance > 0.35) {
-      return darkenColour(hex, 0.5)
-    }
-  }
-  
-  return hex
+/**
+ * Make an arbitrary hex legible in the current mode.
+ *
+ * Previously this darkened anything with luminance > 0.35 when it detected
+ * light mode. That is a rule of thumb, not a contrast guarantee: it fired on
+ * colours that did not need it, missed ones that did, and gave different
+ * answers for the same colour depending on the caller. It now delegates to the
+ * contrast-checked path in utils/teamColours.
+ *
+ * Prefer getTeamColour / getTeamColourByName where the team is known — those
+ * return the canonical per-mode variant instead of correcting a raw hex.
+ */
+export function getSafeTeamColour(hex, role = 'accent') {
+  return rawColour(hex, { role })
 }
 
 /**

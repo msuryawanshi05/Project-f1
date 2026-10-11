@@ -13,7 +13,8 @@ import useRaceWeekendState from '../hooks/useRaceWeekendState'
 import TrackMap from '../components/ui/TrackMap'
 import RaceModal from '../components/ui/RaceModal'
 import { matchCircuit } from '../utils/circuitUtils'
-import { getCountryAbbreviation, formatCountdown, getSafeTeamColour, getRaceStatus } from '../utils/driverUtils'
+import { getCountryAbbreviation, formatCountdown, getRaceStatus } from '../utils/driverUtils'
+import { teamColour } from '../utils/teamColours'
 import { useTilt } from '../hooks/useTilt'
 import { AnimatedNumber } from '../components/ui/AnimatedNumber'
 import { PageReveal, RevealItem } from '../components/layout/PageReveal'
@@ -36,18 +37,19 @@ function useCountdownSeconds(targetDate) {
   return seconds
 }
 
-const TEAM_COLOURS = {
-  'Red Bull': '#3671C6', 'Ferrari': '#E8002D', 'Mercedes': '#27F4D2',
-  'McLaren': '#FF8000', 'Aston Martin': '#229971', 'Alpine': '#FF87BC',
-  'Williams': '#64C4FF', 'RB': '#6692FF', 'Haas': '#B6BABD', 'Sauber': '#52E252',
-  'Audi': '#A6A6A6', 'Cadillac': '#EEB211',
+/**
+ * Team colour, from the shared table in utils/teamColours.
+ *
+ * This page used to carry its OWN hardcoded livery map — a third source of
+ * truth alongside teams.json and Standings' copy — and it had gone stale
+ * (Audi #A6A6A6, Cadillac #EEB211, Mercedes' pre-2026 #27F4D2). Driver codes
+ * are text, so they take the 4.5:1 variant; swatches and bars take the accent.
+ */
+function getTeamColour(name, role = 'accent') {
+  return teamColour(name, { role })
 }
-function getTeamColour(name) {
-  const hex = Object.entries(TEAM_COLOURS).find(([k]) =>
-    name?.toLowerCase().includes(k.toLowerCase())
-  )?.[1] ?? '#555555'
-  return getSafeTeamColour(hex)
-}
+
+const getTeamColourText = (name) => teamColour(name, { role: 'text' })
 
 // ── Podium card ───────────────────────────────────────────────────────────────
 function PodiumCard({ result, pos }) {
@@ -439,7 +441,7 @@ export default function Home() {
                 {/* P1 driver */}
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="font-display font-bold text-4xl"
-                    style={{ color: getTeamColour(p1Driver?.Constructors?.[0]?.name ?? '') }}>
+                    style={{ color: getTeamColourText(p1Driver?.Constructors?.[0]?.name ?? '') }}>
                     {p1Driver?.Driver?.code ?? '—'}
                   </span>
                   <span className="font-body text-base" style={{ color: 'var(--pw-dim)' }}>
@@ -465,7 +467,7 @@ export default function Home() {
                 {p2Driver && (
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>
-                      P2: <span style={{ color: getTeamColour(p2Driver?.Constructors?.[0]?.name ?? '') }}>{p2Driver?.Driver?.code}</span>
+                      P2: <span style={{ color: getTeamColourText(p2Driver?.Constructors?.[0]?.name ?? '') }}>{p2Driver?.Driver?.code}</span>
                     </span>
                     <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>
                       <AnimatedNumber value={parseFloat(p2Driver?.points ?? 0)} /> pts
@@ -482,13 +484,14 @@ export default function Home() {
                     const pts  = parseFloat(entry.points ?? 0)
                     const pct  = maxPts > 0 ? (pts / maxPts) * 100 : 0
                     const col  = getTeamColour(entry.Constructors?.[0]?.name ?? '')
+                    const colText = getTeamColourText(entry.Constructors?.[0]?.name ?? '')
                     return (
                       <div key={entry.Driver?.driverId ?? i} className="flex items-center gap-2">
                         <span className="font-mono text-[10px] w-4 text-right flex-shrink-0"
                           style={{ color: 'var(--pw-ghost)' }}>{i + 1}</span>
                         <div className="w-0.5 h-3 rounded flex-shrink-0" style={{ background: col }} />
                         <span className="font-mono text-xs w-10 flex-shrink-0"
-                          style={{ color: col }}>{entry.Driver?.code}</span>
+                          style={{ color: colText }}>{entry.Driver?.code}</span>
                         <div className="flex-1 h-px" style={{ background: 'var(--pw-border)' }}>
                           <div className="h-full" style={{ width: `${pct}%`, background: col, opacity: 0.7 }} />
                         </div>

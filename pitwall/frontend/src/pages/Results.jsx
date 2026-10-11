@@ -393,7 +393,7 @@ export default function Results() {
         <div className="px-6 py-8 bg-carbon flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-hidden="true" />
-            <span className="font-display text-[11px] font-bold tracking-widest uppercase text-amber-500 dark:text-amber-400">
+            <span className="font-display text-[11px] font-bold tracking-widest uppercase text-amber-700 dark:text-amber-400">
               Awaiting official classification
             </span>
           </div>

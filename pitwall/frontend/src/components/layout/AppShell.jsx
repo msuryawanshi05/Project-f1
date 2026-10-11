@@ -141,7 +141,7 @@ export default function AppShell({ children, wsConnected }) {
               <span className={isLive ? 'led-dot red' : 'w-2 h-2 rounded-full bg-amber-400'} aria-hidden="true" />
               <span
                 className={`font-display text-xs font-bold tracking-widest uppercase ${
-                  isLive ? 'text-status-red' : 'text-amber-500 dark:text-amber-400'
+                  isLive ? 'text-status-red' : 'text-amber-700 dark:text-amber-400'
                 }`}
               >
                 {isLive ? 'LIVE TIMING' : 'PROVISIONAL'}

@@ -7,6 +7,7 @@ import {
 import useF1Store from '../store/useF1Store'
 import { EmptyState } from '../components/ui/EmptyState'
 import { getSafeTeamColour, getCountryAbbreviation } from '../utils/driverUtils'
+import { teamColour, canonicalTeam } from '../utils/teamColours'
 import teamsData from '../data/teams.json'
 import {
   useSeasonDrivers, useGridMeta, useDriverProfile, useTeammateH2H,
@@ -14,9 +15,17 @@ import {
 
 const SEASON = new Date().getFullYear()
 
-function teamColourFor(teamName, liveColour) {
-  if (liveColour) return getSafeTeamColour(liveColour)
-  return getSafeTeamColour(teamsData.teamColours[teamName] ?? '#666666')
+/**
+ * Team colour for this page.
+ *
+ * `role` matters: driver codes render at 14-32px as TEXT and need 4.5:1, while
+ * the card's left border is a UI accent at 3:1. Passing the accent value to
+ * text is what made several 2026 liveries unreadable on white.
+ */
+function teamColourFor(teamName, liveColour, role = 'accent') {
+  if (teamName && canonicalTeam(teamName)) return teamColour(teamName, { role })
+  if (liveColour) return getSafeTeamColour(liveColour, role)
+  return teamColour(teamName, { role })
 }
 
 // ── Headshot with a graceful fallback ────────────────────────────────────────
@@ -87,7 +96,8 @@ function DriversIndex() {
         ...d,
         number: m.number ?? (Number(d.permanentNumber) || null),
         team: m.team ?? teamsData.driverTeams[String(m.number ?? d.permanentNumber)] ?? null,
-        colour: teamColourFor(m.team, m.colour),
+        colour: teamColourFor(m.team, m.colour, 'accent'),
+        textColour: teamColourFor(m.team, m.colour, 'text'),
         headshot: m.headshot ?? null,
       }
     })
@@ -147,7 +157,7 @@ function DriversIndex() {
                   </span>
                   <span
                     className="font-display font-extrabold text-sm tracking-wider uppercase truncate"
-                    style={{ color: d.colour }}
+                    style={{ color: d.textColour }}
                   >
                     {d.code}
                   </span>
@@ -202,7 +212,8 @@ function DriverDetail({ driverId }) {
 
   const { profile, career, seasons, partial, missing, seasonFailures } = data
   const m = meta.byCode[profile.code] ?? {}
-  const colour = teamColourFor(current?.team ?? m.team, m.colour)
+  const colour = teamColourFor(current?.team ?? m.team, m.colour, 'accent')
+  const textColour = teamColourFor(current?.team ?? m.team, m.colour, 'text')
   const chartData = seasons.map((s) => ({ ...s, season: Number(s.season) }))
 
   return (
@@ -219,7 +230,7 @@ function DriverDetail({ driverId }) {
           <Headshot src={m.headshot} code={profile.code} colour={colour} size={92} />
           <div className="min-w-0">
             <div className="flex items-baseline gap-3">
-              <span className="font-display font-black text-3xl tracking-widest uppercase" style={{ color: colour }}>
+              <span className="font-display font-black text-3xl tracking-widest uppercase" style={{ color: textColour }}>
                 {profile.code}
               </span>
               {m.number != null && (

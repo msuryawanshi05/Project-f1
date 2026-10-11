@@ -18,7 +18,11 @@ html.dark {
   --pw-surface-2:   #141418;
   --pw-border:      #1F1F24;
   --pw-muted:       #2A2A32;
-  --pw-ghost:       #4E4E5A;
+  /* Was #4E4E5A = 2.24:1 on --pw-surface-2, far below AA, and it is the
+     colour of every tower column header, stat label and inactive nav item.
+     #7D7D86 is the smallest lift that reaches 4.5:1 on the lightest dark
+     surface a muted label is drawn on. */
+  --pw-ghost:       #7D7D86;
   --pw-dim:         #8F8F9E;
   --pw-text:        #D1D1D6;
   --pw-text-strong: #FFFFFF;
@@ -27,6 +31,14 @@ html.dark {
   --pw-yellow:      #FFF200; /* Sector yellow */
   --pw-purple:      #B468FF; /* Sector purple */
   --pw-teal:        #00D2BE;
+
+  /* Text-safe variants. The accent tokens above are tuned as *accents*
+     (bars, glows, 3:1 UI components); used as small text they fall below
+     AA — --pw-red is 3.85:1 on --pw-surface. Use these when colouring
+     text, e.g. a lap record or a points total. */
+  --pw-red-text:    #E73530;
+  --pw-yellow-text: #FFF200;
+  --pw-green-text:  #00D2BE;
 
   /* Tyre compounds */
   --pw-tyre-hard:   #FFFFFF;
@@ -51,7 +63,8 @@ html:not(.dark) {
   --pw-surface-2:   #FAFAFC;
   --pw-border:      #D2D2DC;
   --pw-muted:       #C5C5D2;
-  --pw-ghost:       #787888;
+  /* Was #787888 = 3.92:1 on --pw-bg; #6E6E7D reaches 4.5:1. */
+  --pw-ghost:       #6E6E7D;
   --pw-dim:         #484852;
   --pw-text:        #1E1E22;
   --pw-text-strong: #080809;
@@ -60,6 +73,15 @@ html:not(.dark) {
   --pw-yellow:      #B5A600;
   --pw-purple:      #863EE0;
   --pw-teal:        #00A090;
+
+  /* Text-safe variants — see the dark block. --pw-yellow is 2.49:1 on white,
+     which made points totals effectively unreadable.
+     Derived against --pw-bg (#F3F3F6), not #FFFFFF: dark text has its LEAST
+     contrast on the darkest surface, and most coloured labels sit on the page
+     background rather than on a card. */
+  --pw-red-text:    #C40500;
+  --pw-yellow-text: #7B7100;
+  --pw-green-text:  #007D71;
 
   /* Tyre compounds */
   --pw-tyre-hard:   #606068;
@@ -72,7 +94,7 @@ html:not(.dark) {
   --pw-scroll-thumb: #D2D2DC;
 
   --pw-countdown-digit: #080809;
-  --pw-countdown-label: #787888;
+  --pw-countdown-label: #6E6E7D;
 }
 
 /* ==================================================================
@@ -144,7 +166,14 @@ html:not(.dark) body {
 .text-pitwall-ghost  { color: var(--pw-ghost)               !important; }
 
 /* status-red should match our token */
-.text-status-red  { color: var(--pw-red)   !important; }
+/* Text utilities use the text-safe variants, not the accent tokens.
+   The accent values are tuned for bars and glows at the 3:1 UI threshold; as
+   small text they sit below AA (--pw-red 3.85:1 on surface, --pw-yellow
+   2.49:1 on white). Border and background utilities keep the accent value —
+   those are not text. One override here covers every usage site. */
+.text-status-red    { color: var(--pw-red-text)    !important; }
+.text-status-yellow { color: var(--pw-yellow-text) !important; }
+.text-status-green  { color: var(--pw-green-text)  !important; }
 .border-status-red { border-color: var(--pw-red) !important; }
 
 /* ==================================================================
