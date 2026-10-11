@@ -207,14 +207,26 @@ def clean_timing(raw: dict) -> dict:
 
             speeds = d.get("Speeds") if isinstance(d.get("Speeds"), dict) else {}
 
+            # Qualifying reports gaps via Stats[] rather than GapToLeader /
+            # IntervalToPositionAhead (which carry race deltas). Take the entry
+            # for the current segment, falling back to the last one present.
+            stats = _indexed(d.get("Stats"))
+            stat = stats[max(stats)] if stats else {}
+            quali_gap = str(stat.get("TimeDiffToFastest", "") or "")
+            quali_int = str(stat.get("TimeDifftoPositionAhead", "") or "")
+
             drivers.append({
                 "number":        int(num_str),
                 # Racing number only. The 3-letter TLA lives in DriverList and is
                 # joined on the client (resolveDriver); this field is NOT a code.
                 "racing_number": int(num_str),
                 "position":      pos_int,
+                # Race gaps. Qualifying equivalents are below — the UI picks
+                # whichever is populated for the current session type.
                 "gap_to_leader": _val(d.get("GapToLeader")),
                 "gap_to_ahead":  _val(d.get("IntervalToPositionAhead")),
+                "quali_gap_to_leader": quali_gap,
+                "quali_gap_to_ahead":  quali_int,
                 "last_lap":      last_lap_val,
                 "lap":           lap_val,
                 "sector_1":      {"time": s1_val, "status": s1_state},
@@ -225,6 +237,9 @@ def clean_timing(raw: dict) -> dict:
                 "stopped":       bool(d.get("Stopped", False)),
                 "retired":       bool(d.get("Retired", False)),
                 "knockout":      bool(d.get("KnockedOut", False)),
+                # True while this driver sits below the segment's advancement
+                # line. F1 sets it live during Q1/Q2 as the order shuffles.
+                "cutoff":        bool(d.get("Cutoff", False)),
                 "deleted_lap":   bool(d.get("DeletedLap", False)),
                 # Frontend compatible fields
                 "last_lap_time_in_s": parse_lap_time_to_seconds(last_lap_val),
@@ -270,7 +285,33 @@ def clean_timing(raw: dict) -> dict:
             fastest is not None and d["best_lap_time_in_s"] == fastest
         )
 
-    return {"drivers": drivers}
+    # SessionPart and NoEntries are siblings of Lines on the TimingData root.
+    #
+    # SessionPart is the authoritative qualifying segment number (1 | 2 | 3).
+    # Detecting the segment by substring-matching SessionInfo.Name for "Q2"/"Q3"
+    # can never work: F1 names the session "Qualifying" throughout, so Q2 and Q3
+    # were never detected and the tower drew the Q1 cut line for the whole hour.
+    #
+    # NoEntries is the car count per segment, e.g. [22, 15, 10] for 2026
+    # (verified against Baku 2026 Qualifying: 22 cars in Q1, 15 in Q2, 10 in Q3).
+    # Reading it instead of hardcoding 15/10 keeps the cut lines correct if the
+    # grid size or the regulations change.
+    try:
+        session_part = int(raw.get("SessionPart")) if raw.get("SessionPart") else None
+    except (ValueError, TypeError):
+        session_part = None
+
+    no_entries = raw.get("NoEntries")
+    if not isinstance(no_entries, list) or not all(
+        isinstance(n, int) for n in no_entries
+    ):
+        no_entries = None
+
+    return {
+        "drivers":      drivers,
+        "session_part": session_part,
+        "no_entries":   no_entries,
+    }
 
 
 def clean_tyres(raw: dict) -> dict:
@@ -421,6 +462,24 @@ def clean_session(raw: dict) -> dict:
 
     clock = raw.get("Clock", raw.get("SystemTime", ""))
 
+    # SessionData.Series[] carries QualifyingPart alongside each timestamped
+    # entry. Secondary to TimingData.SessionPart, but it survives in the merged
+    # SessionState even when a TimingData delta omits SessionPart.
+    qualifying_part = None
+    series = raw.get("Series")
+    series_items = (
+        list(series.values()) if isinstance(series, dict)
+        else series if isinstance(series, list)
+        else []
+    )
+    for entry in reversed(series_items):
+        if isinstance(entry, dict) and entry.get("QualifyingPart"):
+            try:
+                qualifying_part = int(entry["QualifyingPart"])
+            except (ValueError, TypeError):
+                qualifying_part = None
+            break
+
     # Derive phase
     status_lower = str(status).lower()
     if "finished" in status_lower or "ends" in status_lower:
@@ -442,6 +501,7 @@ def clean_session(raw: dict) -> dict:
         "status":     status,
         "clock":      clock,
         "phase":      phase,
+        "qualifying_part": qualifying_part,
     }
 
 

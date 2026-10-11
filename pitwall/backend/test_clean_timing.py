@@ -128,6 +128,75 @@ check("S3 is 23.294 not 23.29", by_num[1]["s3_time_in_s"], 23.294)
 print("--- clean_session no longer claims a lap number ---")
 check("session.lap is None", clean_session({"Name": "Race", "Status": "Started"})["lap"], None)
 
+# ── Qualifying segment detection ────────────────────────────────────────────
+# F1 names the session "Qualifying" for all three segments, so substring
+# matching on the name can never distinguish Q1/Q2/Q3. SessionPart (TimingData)
+# and Series[].QualifyingPart (SessionData) are the real sources.
+QUALI = {
+    "SessionPart": 2,
+    "NoEntries": [22, 15, 10],
+    "Lines": {
+        "63": {
+            "RacingNumber": "63", "Position": "1",
+            "BestLapTime": {"Value": "1:42.526", "Lap": 7},
+            "LastLapTime": {"Value": "1:42.526", "PersonalFastest": True, "OverallFastest": True},
+            "Stats": {"0": {"TimeDiffToFastest": "", "TimeDifftoPositionAhead": ""},
+                      "1": {"TimeDiffToFastest": "", "TimeDifftoPositionAhead": ""}},
+            "Sectors": {},
+        },
+        "81": {
+            "RacingNumber": "81", "Position": "14", "Cutoff": False,
+            "BestLapTime": {"Value": "1:43.004", "Lap": 6},
+            "LastLapTime": {"Value": "1:43.004"},
+            "Stats": {"0": {"TimeDiffToFastest": "+0.601", "TimeDifftoPositionAhead": "+0.044"},
+                      "1": {"TimeDiffToFastest": "+0.478", "TimeDifftoPositionAhead": "+0.021"}},
+            "Sectors": {},
+        },
+        "5": {
+            "RacingNumber": "5", "Position": "16", "Cutoff": True, "KnockedOut": True,
+            "BestLapTime": {"Value": "1:43.901", "Lap": 5},
+            "LastLapTime": {"Value": "1:43.901"},
+            "Stats": {"0": {"TimeDiffToFastest": "+1.375", "TimeDifftoPositionAhead": "+0.210"}},
+            "Sectors": {},
+        },
+    },
+}
+
+print("--- qualifying segment + cut sizes (SessionPart / NoEntries) ---")
+q = clean_timing(QUALI)
+qb = {d["number"]: d for d in q["drivers"]}
+check("session_part from TimingData", q["session_part"], 2)
+check("no_entries (2026 grid: 22/15/10)", q["no_entries"], [22, 15, 10])
+check("no_entries rejects malformed", clean_timing({"NoEntries": "nope", "Lines": {}})["no_entries"], None)
+check("session_part absent -> None", clean_timing({"Lines": {}})["session_part"], None)
+
+print("--- qualifying gaps come from Stats[], not GapToLeader ---")
+check("quali gap to leader", qb[81]["quali_gap_to_leader"], "+0.478")
+check("quali interval", qb[81]["quali_gap_to_ahead"], "+0.021")
+check("leader has empty quali gap", qb[63]["quali_gap_to_leader"], "")
+check("falls back to last Stats entry", qb[5]["quali_gap_to_leader"], "+1.375")
+check("race gap still empty in quali", qb[81]["gap_to_leader"], "")
+
+print("--- cutoff / knockout ---")
+check("below the line", qb[5]["cutoff"], True)
+check("above the line", qb[81]["cutoff"], False)
+check("knocked out", qb[5]["knockout"], True)
+
+print("--- best lap drives the quali order ---")
+check("P1 best lap purple", qb[63]["best_lap_overall_fastest"], True)
+check("P14 best lap not purple", qb[81]["best_lap_overall_fastest"], False)
+check("best lap seconds", round(qb[81]["best_lap_time_in_s"], 3), 103.004)
+
+print("--- Series[].QualifyingPart (SessionData fallback) ---")
+sd = clean_session({
+    "Name": "Qualifying",
+    "Series": {"0": {"Utc": "...", "QualifyingPart": 1},
+               "1": {"Utc": "...", "QualifyingPart": 3}},
+})
+check("takes the latest Series entry", sd["qualifying_part"], 3)
+check("name alone cannot reveal the segment", "Q3" in sd["name"], False)
+check("no Series -> None", clean_session({"Name": "Race"})["qualifying_part"], None)
+
 print()
 if fails:
     print("\n".join(fails))

@@ -61,6 +61,15 @@ const useF1Store = create((set, get) => ({
   // ── Phase 6: Per-driver best lap times (for qualifying mode) ────────────────
   bestLaps: {},       // { [driverNumber]: bestLapSeconds }
 
+  // ── Qualifying segment state ────────────────────────────────────────────────
+  // part:      1 | 2 | 3 — from TimingData.SessionPart, with
+  //            SessionData.Series[].QualifyingPart as a fallback. F1 names the
+  //            session "Qualifying" throughout all three segments, so this
+  //            cannot be derived from session.name by substring matching.
+  // noEntries: cars per segment, e.g. [22, 15, 10] for 2026. Drives the
+  //            knockout cut lines instead of hardcoded 15/10.
+  qualifying: { part: null, noEntries: null },
+
   // ── Notification queue (for Phase 7 popup system) ──────────────────────────
   notifications: [],
 
@@ -268,6 +277,15 @@ const useF1Store = create((set, get) => ({
   setCurrentSessionKey: (key) => set({ currentSessionKey: key }),
 
   setCurrentRound: (round) => set({ currentRound: round }),
+
+  setQualifying: (partial) =>
+    set((state) => {
+      const next = { ...state.qualifying, ...partial }
+      if (next.part === state.qualifying.part && next.noEntries === state.qualifying.noEntries) {
+        return state
+      }
+      return { qualifying: next }
+    }),
 
   pitStops: [],
   addPitStop: (stop) =>

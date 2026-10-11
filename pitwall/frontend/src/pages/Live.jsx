@@ -14,7 +14,8 @@ import StrategyTab from './live/StrategyTab'
 import TelemetryTab from './live/TelemetryTab'
 import RadioTab from './live/RadioTab'
 import { useQualifyingGrid } from '../hooks/useQualifyingGrid'
-import { TOWER_COLUMNS, TOWER_GRID_TEMPLATE, TOWER_MIN_WIDTH_PX } from '../utils/layoutConstants'
+import { getTowerColumns, towerGridTemplate, towerMinWidth } from '../utils/layoutConstants'
+import { getQualifyingCut, isQualifyingSessionName, qualifyingHeaderLabel } from '../utils/qualifyingUtils'
 import QualifyingGridTower from '../components/ui/QualifyingGridTower'
 
 // ── Countdown inline ──────────────────────────────────────────────────────────
@@ -283,6 +284,7 @@ export default function Live() {
   const weather     = useF1Store((s) => s.weather)
   const settings    = useF1Store((s) => s.settings)
   const raceControl = useF1Store((s) => s.raceControl)
+  const qualifying  = useF1Store((s) => s.qualifying)
 
   const weekendState = useRaceWeekendState()
   const isLive = weekendState.mode === 'SESSION_LIVE'
@@ -296,15 +298,24 @@ export default function Live() {
   const { stints: openf1Stints } = useOpenF1Stints(null)
   const { reachable: openf1Reachable, checked: openf1Checked } = useOpenF1Status()
 
-  // Memoised derived data
-  const sortedTiming = useMemo(() =>
-    [...timing].sort((a, b) => {
-      const pa = parseInt(a.position ?? 99, 10)
-      const pb = parseInt(b.position ?? 99, 10)
-      return pa - pb
-    }),
-    [timing]
-  )
+  // Memoised derived data.
+  //
+  // Position is authoritative in both modes — in qualifying F1 already orders
+  // Position by best lap. Best lap is used only as a tie-break for the window
+  // where several drivers still share position 0 before the feed has ordered
+  // them, and drivers with no lap set sort last (as real F1 shows them).
+  const sortedTiming = useMemo(() => {
+    const isQ = /QUALIFYING|SHOOTOUT/.test((session.name ?? '').toUpperCase())
+    return [...timing].sort((a, b) => {
+      const pa = parseInt(a.position ?? 99, 10) || 99
+      const pb = parseInt(b.position ?? 99, 10) || 99
+      if (pa !== pb) return pa - pb
+      if (!isQ) return 0
+      const ba = a.best_lap_time_in_s ?? Infinity
+      const bb = b.best_lap_time_in_s ?? Infinity
+      return ba - bb
+    })
+  }, [timing, session.name])
 
   // tyresByDriver: merge SignalR tyre data with OpenF1 stint data
   const tyresByDriver = useMemo(() => {
@@ -416,10 +427,24 @@ export default function Live() {
   }, [raceControl])
 
   const sessionName = session.name ?? ''
-  const isQ  = sessionName.toUpperCase().includes('QUALIFYING') || sessionName.includes('Q1')
-  const isQ2 = sessionName.includes('Q2') || sessionName.includes('Q3')
-  const isQ3 = sessionName.includes('Q3')
-  const q1Cut = 15, q2Cut = 10
+
+  // ── Qualifying detection ────────────────────────────────────────────────────
+  // The session TYPE comes from its name ("Qualifying" / "Sprint Qualifying"),
+  // but the SEGMENT cannot: F1 names the session "Qualifying" for all three
+  // parts, so `sessionName.includes('Q2')` was never true and the tower drew
+  // the Q1 cut line for the entire hour. The segment comes from
+  // TimingData.SessionPart (or SessionData.Series[].QualifyingPart), both now
+  // routed into store.qualifying.
+  const isQualifyingSession = isQualifyingSessionName(sessionName)
+  const qualiPart = qualifying.part ?? null
+  const towerMode = isQualifyingSession ? 'QUALI' : 'RACE'
+  const towerColumns = getTowerColumns(towerMode)
+
+  // Cut maths lives in utils/qualifyingUtils (pure + tested) because an
+  // off-by-one here tells viewers the wrong drivers are being eliminated.
+  const { cutIndex, eliminatedFrom } = isQualifyingSession
+    ? getQualifyingCut(qualiPart, qualifying.noEntries)
+    : { cutIndex: null, eliminatedFrom: null }
 
   const currentLap = session.lap ?? sortedTiming[0]?.lap ?? (sortedTiming.length > 0 ? 1 : null)
   // No invented fallback: circuitData.laps is null for circuits we have no
@@ -456,12 +481,18 @@ export default function Live() {
     ? (session.name ? session.name.toUpperCase() : 'RACE')
     : weekendState.currentRace?.raceName ?? 'NO SESSION'
 
+  // Qualifying shows the live segment instead of a lap count — there are no
+  // laps to count down in a knockout session.
+  const qualiHeaderLabel = isQualifyingSession
+    ? qualifyingHeaderLabel(qualiPart, qualifying.noEntries)
+    : null
+
   const sessionHeaderRight = isSuspended
     ? (raceControl[0]?.message?.toUpperCase()?.includes('START ORDER') ? 'ORIGINAL GRID' : 'START SUSPENDED')
     : isFormationLap
     ? 'BEHIND SAFETY CAR'
     : isSessionActive
-    ? `LAP ${currentLap ?? '—'} / ${totalLaps ?? '—'}`
+    ? (qualiHeaderLabel ?? `LAP ${currentLap ?? '—'} / ${totalLaps ?? '—'}`)
     // Before lights out there is no lap 0 — the race hasn't started. Showing
     // "LAP 0 / 53" here was the second source of the phantom lap counter.
     : weekendState.mode === 'WEEKEND_BETWEEN_SESSIONS' || weekendState.mode === 'WEEKEND_SESSION_SOON' || weekendState.mode === 'SESSION_LIVE'
@@ -562,6 +593,11 @@ export default function Live() {
                     ? 'PROVISIONAL STARTING GRID'
                     : sessionHeaderTitle}
                 </span>
+                {isQualifyingSession && qualiPart != null ? (
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-status-red/15 text-status-red border border-status-red/40">
+                    Q{qualiPart}
+                  </span>
+                ) : null}
                 {isFormationLap ? (
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/40 animate-pulse">
                     FORMATION LAP
@@ -608,18 +644,18 @@ export default function Live() {
 
             {/* Timing table container — synchronized horizontal and vertical scroll */}
             <div className="flex-1 flex flex-col overflow-y-auto overflow-x-auto">
-              <div className="w-full flex flex-col flex-1" style={{ minWidth: TOWER_MIN_WIDTH_PX }}>
+              <div className="w-full flex flex-col flex-1" style={{ minWidth: towerMinWidth(towerColumns) }}>
                 {/* Column headers for active live race */}
                 {isSessionActive && sortedTiming.length > 0 && (
                   <div className="sticky top-0 z-10 w-full bg-pitwall-surface-2 border-b border-pitwall-border px-4">
-                    {/* Same TOWER_GRID_TEMPLATE as DriverRow — header and rows
+                    {/* Same column list DriverRow iterates — header and rows
                         are aligned by construction, not by matching numbers. */}
                     <div
                       className="grid items-center h-7 w-full"
-                      style={{ gridTemplateColumns: TOWER_GRID_TEMPLATE }}
+                      style={{ gridTemplateColumns: towerGridTemplate(towerColumns) }}
                       role="row"
                     >
-                      {TOWER_COLUMNS.map((col) => (
+                      {towerColumns.map((col) => (
                         <div
                           key={col.key}
                           role="columnheader"
@@ -660,9 +696,7 @@ export default function Live() {
                       const gapToAhead = currentGapSecs != null && aheadGapSecs != null ? currentGapSecs - aheadGapSecs : null
                       const isBattling = index > 0 && gapToAhead != null && gapToAhead < 1.0
 
-                      const showQ1Div = isQ  && !isQ2 && index === q1Cut - 1
-                      const showQ2Div = isQ2 && !isQ3 && index === q2Cut - 1
-                      const showQ3Div = isQ3 && index === 9
+                      const showCutLine = cutIndex != null && index === cutIndex
 
                       return (
                         <div key={driverNum ?? index}>
@@ -677,14 +711,15 @@ export default function Live() {
                             isBattling={isBattling}
                             showSidebar={showSidebar}
                             penalty={penalty}
+                            mode={towerMode}
                           />
-                          {(showQ1Div || showQ2Div || showQ3Div) && (
+                          {showCutLine && (
                             <div className="flex items-center gap-2 px-4 py-1 bg-pitwall-surface-2">
-                              <div className="flex-1 h-px bg-pitwall-border" />
-                              <span className="font-mono text-[10px] text-pitwall-ghost tracking-widest">
-                                {showQ3Div ? 'Q3 OUT' : showQ2Div ? 'Q2 OUT' : 'Q1 OUT'}
+                              <div className="flex-1 h-px bg-status-red/50" />
+                              <span className="font-mono text-[10px] text-status-red tracking-widest font-bold">
+                                Q{qualiPart} CUT · P{eliminatedFrom}+ ELIMINATED
                               </span>
-                              <div className="flex-1 h-px bg-pitwall-border" />
+                              <div className="flex-1 h-px bg-status-red/50" />
                             </div>
                           )}
                         </div>

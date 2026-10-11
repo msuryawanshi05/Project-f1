@@ -10,8 +10,9 @@ const SHORTCUTS = [
       { key: '2', label: 'Go to Live Dashboard' },
       { key: '3', label: 'Go to Season Calendar' },
       { key: '4', label: 'Go to Standings' },
-      { key: '5', label: 'Go to Results' },
-      { key: '6', label: 'Go to Settings' },
+      { key: '5', label: 'Go to Drivers' },
+      { key: '6', label: 'Go to Results' },
+      { key: '7', label: 'Go to Settings' },
     ],
   },
   {

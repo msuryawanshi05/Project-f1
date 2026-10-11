@@ -20,6 +20,7 @@ const Home      = lazy(() => import('./pages/Home'))
 const Live      = lazy(() => import('./pages/Live'))
 const Season    = lazy(() => import('./pages/Season'))
 const Standings = lazy(() => import('./pages/Standings'))
+const Drivers   = lazy(() => import('./pages/Drivers'))
 const Results   = lazy(() => import('./pages/Results'))
 const Settings  = lazy(() => import('./pages/Settings'))
 const NotFound  = lazy(() => import('./pages/NotFound'))
@@ -201,6 +202,10 @@ function AppInner({ connected }) {
             <Route path="/live"      element={<Live />}      />
             <Route path="/season"    element={<Season />}    />
             <Route path="/standings" element={<Standings />} />
+            {/* One component serves both: the index lists the grid, the
+                :driverId form renders that driver's profile. */}
+            <Route path="/drivers"            element={<Drivers />} />
+            <Route path="/drivers/:driverId"  element={<Drivers />} />
             <Route path="/results"   element={<Results />}   />
             <Route path="/settings"  element={<Settings />}  />
             <Route path="*"          element={<NotFound />}  />

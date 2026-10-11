@@ -22,45 +22,86 @@
  * horizontally, which is the correct failure mode for tabular data — far better
  * than silently truncating a lap time.
  *
- * TIMING_MIN_PX values are derived from the widest string each column must hold,
- * measured in Orbitron (the `.timing-number` face, which is notably wide):
- *   LAST LAP  "1:32.741"  -> 92px
- *   S1/S2/S3  "47.294"    -> 76px
- *   GAP       "+1 LAP"    -> 78px
+ * Both the header and every row build their cells by iterating the SAME column
+ * list, so a column cannot exist in one and not the other.
+ *
+ * Minimums are derived from the widest string each column must hold, measured
+ * in Orbitron (the `.timing-number` face, which is notably wide):
+ *   BEST/LAST LAP  "1:32.741"  -> 90px
+ *   S1/S2/S3       "47.294"    -> 76px
+ *   GAP            "+1 LAP"    -> 74px
  */
 
-/** Ordered tower columns. `label` is the header text; `grid` is its track size. */
-export const TOWER_COLUMNS = [
-  { key: 'accent',  label: '',         grid: '4px',            align: 'center' },
-  { key: 'pos',     label: 'POS',      grid: '40px',           align: 'center' },
-  { key: 'drv',     label: 'DRV',      grid: 'minmax(74px, 1fr)',  align: 'left' },
-  { key: 'gap',     label: 'GAP',      grid: 'minmax(78px, 1fr)',  align: 'left' },
-  { key: 'lastLap', label: 'LAST LAP', grid: 'minmax(92px, 1fr)',  align: 'left' },
-  { key: 's1',      label: 'S1',       grid: 'minmax(76px, auto)', align: 'center' },
-  { key: 's2',      label: 'S2',       grid: 'minmax(76px, auto)', align: 'center' },
-  { key: 's3',      label: 'S3',       grid: 'minmax(76px, auto)', align: 'center' },
-  { key: 'tyre',    label: 'TYRE',     grid: '54px',           align: 'center' },
-  { key: 'pit',     label: 'PIT',      grid: '34px',           align: 'center' },
-  { key: 'expand',  label: '',         grid: '26px',           align: 'center' },
+/** Every column the tower can show, keyed for lookup. */
+const COLUMN = {
+  accent:  { key: 'accent',  label: '',         grid: '4px',                align: 'center' },
+  pos:     { key: 'pos',     label: 'POS',      grid: '38px',               align: 'center' },
+  car:     { key: 'car',     label: 'CAR',      grid: '32px',               align: 'center' },
+  drv:     { key: 'drv',     label: 'DRV',      grid: 'minmax(72px, 1fr)',  align: 'left'   },
+  gap:     { key: 'gap',     label: 'GAP',      grid: 'minmax(74px, 1fr)',  align: 'left'   },
+  int:     { key: 'int',     label: 'INT',      grid: 'minmax(70px, 1fr)',  align: 'left'   },
+  bestLap: { key: 'bestLap', label: 'BEST LAP', grid: 'minmax(90px, 1fr)',  align: 'left'   },
+  lastLap: { key: 'lastLap', label: 'LAST LAP', grid: 'minmax(90px, 1fr)',  align: 'left'   },
+  s1:      { key: 's1',      label: 'S1',       grid: 'minmax(76px, auto)', align: 'center' },
+  s2:      { key: 's2',      label: 'S2',       grid: 'minmax(76px, auto)', align: 'center' },
+  s3:      { key: 's3',      label: 'S3',       grid: 'minmax(76px, auto)', align: 'center' },
+  tyre:    { key: 'tyre',    label: 'TYRE',     grid: '52px',               align: 'center' },
+  pit:     { key: 'pit',     label: 'PIT',      grid: '32px',               align: 'center' },
+  mom:     { key: 'mom',     label: 'MOM',      grid: '28px',               align: 'center' },
+  expand:  { key: 'expand',  label: '',         grid: '24px',               align: 'center' },
+}
+
+/**
+ * Race / practice tower.
+ *
+ * GAP is to the leader and INT to the car ahead — the distinction real F1 makes
+ * and the one that tells you whether a driver is actually in a fight. The
+ * backend has always sent both (`gap_to_leader`, `gap_to_ahead`); only GAP was
+ * ever rendered, and battle detection re-derived the interval by subtracting
+ * leader gaps.
+ */
+export const TOWER_COLUMNS_RACE = [
+  COLUMN.accent, COLUMN.pos, COLUMN.car, COLUMN.drv,
+  COLUMN.gap, COLUMN.int, COLUMN.lastLap,
+  COLUMN.s1, COLUMN.s2, COLUMN.s3,
+  COLUMN.tyre, COLUMN.pit, COLUMN.mom, COLUMN.expand,
 ]
 
 /**
- * `grid-template-columns` for both the header and every row. Applied as an
- * inline style so the two can never diverge — if a column changes here, the
- * header and the rows change together, by construction.
+ * Qualifying tower.
+ *
+ * BEST LAP is the column that matters — qualifying position is decided by it,
+ * not by the last lap — so it sits ahead of LAST LAP. PIT count and MOM are
+ * dropped: neither is meaningful across a 3-segment knockout session.
  */
-export const TOWER_GRID_TEMPLATE = TOWER_COLUMNS.map((c) => c.grid).join(' ')
+export const TOWER_COLUMNS_QUALI = [
+  COLUMN.accent, COLUMN.pos, COLUMN.car, COLUMN.drv,
+  COLUMN.gap, COLUMN.int, COLUMN.bestLap, COLUMN.lastLap,
+  COLUMN.s1, COLUMN.s2, COLUMN.s3,
+  COLUMN.tyre, COLUMN.expand,
+]
+
+/** Pick the column set for a tower mode: 'QUALI' | 'RACE'. */
+export function getTowerColumns(mode) {
+  return mode === 'QUALI' ? TOWER_COLUMNS_QUALI : TOWER_COLUMNS_RACE
+}
+
+/** `grid-template-columns` for a column set. Header and rows share this. */
+export function towerGridTemplate(columns) {
+  return columns.map((c) => c.grid).join(' ')
+}
 
 /**
- * Sum of the fixed/minimum track widths. Used as the tower's `min-width` so the
- * container scrolls instead of compressing columns past their legible minimum.
+ * Sum of the fixed/minimum track widths for a column set. Used as the tower's
+ * `min-width` so the container scrolls instead of compressing columns past
+ * their legible minimum.
  */
-export const TOWER_MIN_WIDTH_PX = TOWER_COLUMNS.reduce((total, c) => {
-  const match = /minmax\((\d+)px/.exec(c.grid) ?? /^(\d+)px$/.exec(c.grid)
-  return total + (match ? Number(match[1]) : 0)
-}, 0)
+export function towerMinWidth(columns) {
+  return columns.reduce((total, c) => {
+    const match = /minmax\((\d+)px/.exec(c.grid) ?? /^(\d+)px$/.exec(c.grid)
+    return total + (match ? Number(match[1]) : 0)
+  }, 0)
+}
 
 /** Row height by density setting. */
 export const TOWER_ROW_HEIGHT = { compact: 'h-8', comfortable: 'h-10' }
-
-export default TOWER_GRID_TEMPLATE

@@ -109,22 +109,6 @@ export function getSegmentColour(code) {
 }
 
 /**
- * Determine qualifying session phase and eliminated drivers.
- * Returns { phase: "Q1"|"Q2"|"Q3", eliminated: [driverNumbers] }
- */
-export function getQualiPhase(sessionName, timing) {
-  const phase = sessionName?.includes('Q3')
-    ? 'Q3'
-    : sessionName?.includes('Q2')
-    ? 'Q2'
-    : 'Q1'
-
-  const eliminated = timing.filter((d) => d.knockout).map((d) => d.number)
-
-  return { phase, eliminated }
-}
-
-/**
  * Parse gap string (e.g. "+2.341", "LEADER", "+1 LAP") to seconds.
  * Returns 0 for leader, null for LAP gaps (not plottable on a seconds chart).
  */

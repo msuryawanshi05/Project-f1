@@ -5,6 +5,7 @@ import {
 import useF1Store from '../../store/useF1Store'
 import { getTeamColour, formatPitDuration } from '../../utils/driverUtils'
 import TyreIcon from '../../components/ui/TyreIcon'
+import SpeedTrapBoard from '../../components/ui/SpeedTrapBoard'
 import { EmptyState } from '../../components/ui/EmptyState'
 import useRaceWeekendState from '../../hooks/useRaceWeekendState'
 import teamsData from '../../data/teams.json'
@@ -429,6 +430,17 @@ export default function StrategyTab() {
         <div className="flex-1 p-4 bg-pitwall-bg">
           <GapChart gapHistory={gapHistory} top5={top5} drivers={drivers} />
         </div>
+      </div>
+
+      {/* ── Speed Traps ─────────────────────────────────────────────── */}
+      {/* TimingData.Speeds{I1,I2,FL,ST} — extracted from the feed for the first
+          time this pass. Matters more in 2026: MOM creates large speed deltas
+          between cars at the same point on track. */}
+      <div className="border border-pitwall-border rounded bg-pitwall-surface/20 flex flex-col overflow-hidden">
+        <div className="px-4 py-2 font-display text-[10px] text-pitwall-dim tracking-widest uppercase border-b border-pitwall-border bg-pitwall-surface-2 flex-shrink-0 font-bold">
+          Speed Traps · Session Best Per Loop
+        </div>
+        <SpeedTrapBoard timing={sortedTimings} drivers={drivers} />
       </div>
 
       {/* ── Pit Stop Log ────────────────────────────────────────────── */}

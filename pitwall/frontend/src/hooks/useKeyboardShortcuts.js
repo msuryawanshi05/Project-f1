@@ -23,8 +23,9 @@ export function useKeyboardShortcuts() {
       case '2': navigate('/live');       break
       case '3': navigate('/season');     break
       case '4': navigate('/standings');  break
-      case '5': navigate('/results');    break
-      case '6': navigate('/settings');   break
+      case '5': navigate('/drivers');    break
+      case '6': navigate('/results');    break
+      case '7': navigate('/settings');   break
 
       // ── Live sub-tabs ────────────────────────────────────────────────────────
       case 't':

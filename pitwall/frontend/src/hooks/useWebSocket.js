@@ -52,6 +52,7 @@ export function useWebSocket() {
     addRaceControl,
     setCurrentSessionKey,
     setCurrentRound,
+    setQualifying,
     updateBestLap,
     updateGapHistory,
     resetLiveSession,
@@ -89,6 +90,11 @@ export function useWebSocket() {
           total_laps: data.total_laps ?? cur.total_laps,
           phase: incomingPhase,
         })
+        // Secondary source for the qualifying segment: SessionData.Series[].
+        // Used when a TimingData delta omits SessionPart.
+        if (data.qualifying_part != null) {
+          setQualifying({ part: data.qualifying_part })
+        }
         if (isPre && cur.phase !== 'PRE') {
           resetLiveSession()
         }
@@ -103,6 +109,16 @@ export function useWebSocket() {
       case 'timing': {
         const drivers = data.drivers ?? []
         setTiming(drivers)
+
+        // Qualifying segment + per-segment car counts ride on the TimingData
+        // root alongside Lines. SessionPart is the authoritative Q1/Q2/Q3
+        // signal; noEntries ([22, 15, 10] in 2026) gives the cut lines.
+        if (data.session_part != null || data.no_entries != null) {
+          const patch = {}
+          if (data.session_part != null) patch.part = data.session_part
+          if (Array.isArray(data.no_entries)) patch.noEntries = data.no_entries
+          if (Object.keys(patch).length > 0) setQualifying(patch)
+        }
         if (drivers.length > 0) {
           const cur = useF1Store.getState().session
           const hasLiveCars = drivers.some(d => d.pit_out || !d.in_pit || d.last_lap || d.gap_to_leader)
@@ -125,11 +141,15 @@ export function useWebSocket() {
           }
         }
 
-        // Accumulate best laps for qualifying mode
+        // Accumulate best laps. TimingData.BestLapTime is authoritative (F1
+        // already excludes deleted laps from it); the last_lap path remains for
+        // feeds that only send LastLapTime.
         drivers.forEach((d) => {
-          if (d.last_lap) {
+          if (d.best_lap_time_in_s != null) {
+            updateBestLap(d.number, d.best_lap_time_in_s)
+          } else if (d.last_lap && !d.deleted_lap) {
             const secs = lapTimeToSeconds(d.last_lap)
-            if (secs && !d.deleted_lap) updateBestLap(d.number, secs)
+            if (secs) updateBestLap(d.number, secs)
           }
         })
         

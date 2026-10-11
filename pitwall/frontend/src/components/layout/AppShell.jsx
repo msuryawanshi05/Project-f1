@@ -13,8 +13,9 @@ const NAV = [
   { to: '/live',       label: 'LIVE',      key: '2' },
   { to: '/season',     label: 'SEASON',    key: '3' },
   { to: '/standings',  label: 'STANDINGS', key: '4' },
-  { to: '/results',    label: 'RESULTS',   key: '5' },
-  { to: '/settings',   label: 'SETTINGS',  key: '6' },
+  { to: '/drivers',    label: 'DRIVERS',   key: '5' },
+  { to: '/results',    label: 'RESULTS',   key: '6' },
+  { to: '/settings',   label: 'SETTINGS',  key: '7' },
 ]
 
 /**
