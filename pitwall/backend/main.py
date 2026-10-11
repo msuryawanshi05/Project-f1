@@ -16,7 +16,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import requests as req_sync
 
@@ -117,98 +117,206 @@ async def health_check():
     return {"status": "ok", "clients": len(connected_clients)}
 
 
+OPENF1_BASE = "https://api.openf1.org/v1"
+
+
+async def _resolve_openf1_session(client: httpx.AsyncClient, year: int) -> dict:
+    """
+    Resolve the live-or-most-recent OpenF1 session for `year`.
+
+    Returns {session_key, session_name, session_type, circuit_short_name, date_start}
+    or {} when OpenF1 is unreachable / has no sessions yet.
+
+    This exists because /api/current-session used to return the Jolpica *round
+    number* as "session_key". Callers (RadioTab, the OpenF1 hooks) pass that
+    straight to OpenF1 as ?session_key=, where round 17 means nothing — so every
+    OpenF1-backed feature silently returned no data. OpenF1 session keys are
+    five-digit identifiers unrelated to round numbers.
+    """
+    try:
+        resp = await client.get(f"{OPENF1_BASE}/sessions", params={"year": year})
+        resp.raise_for_status()
+        sessions = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("OpenF1 session lookup failed: %s", exc)
+        return {}
+
+    if not isinstance(sessions, list) or not sessions:
+        return {}
+
+    now = datetime.now(timezone.utc)
+
+    def _dt(value):
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
+    live, past = None, []
+    for sess in sessions:
+        if not isinstance(sess, dict) or sess.get("is_cancelled"):
+            continue
+        start_dt, end_dt = _dt(sess.get("date_start")), _dt(sess.get("date_end"))
+        if start_dt is None:
+            continue
+        # Treat a session as live for a while past its scheduled end — red flags
+        # and delays routinely push a session well beyond date_end.
+        if end_dt is not None and start_dt <= now <= end_dt + timedelta(hours=2):
+            live = sess
+            break
+        if start_dt <= now:
+            past.append((start_dt, sess))
+
+    chosen = live or (max(past, key=lambda pair: pair[0])[1] if past else None)
+    if not chosen:
+        return {}
+
+    return {
+        "session_key":        chosen.get("session_key"),
+        "session_name":       chosen.get("session_name"),
+        "session_type":       chosen.get("session_type"),
+        "circuit_short_name": chosen.get("circuit_short_name"),
+        "date_start":         chosen.get("date_start"),
+        "is_live":            live is not None,
+    }
+
+
 @app.get("/api/current-session")
 async def current_session():
     """
-    Resolve the current or most-recent session from Jolpica (Ergast mirror).
+    Resolve the current or most-recent session.
 
-    OpenF1 now requires paid subscription for all data — we use Jolpica instead.
-    Jolpica provides race weekend dates and session times for free.
+    Jolpica (free, no auth) supplies the race weekend: round, circuit, race name.
+    OpenF1 (free, no auth) supplies the real `session_key` used by every
+    /api/openf1/* call.
 
-    Returns: { session_key, session_name, circuit, year, round }
-    session_key is the Jolpica round number (used as a fallback identifier).
+    Returns:
+      session_key          — OpenF1 session key, or None. Pass this to OpenF1.
+      openf1_session_key   — same value, named explicitly.
+      round                — Jolpica round number. NOT an OpenF1 session key.
+      session_name, session_type, circuit, circuit_name, race_name, year, is_live
     """
     today = date.today()
-    year  = today.year
+    year = today.year
     today_str = today.isoformat()
 
     async with httpx.AsyncClient(timeout=10) as client:
+        openf1 = await _resolve_openf1_session(client, year)
+
         try:
-            resp = await client.get(
-                f"https://api.jolpi.ca/ergast/f1/{year}.json",
-            )
+            resp = await client.get(f"https://api.jolpi.ca/ergast/f1/{year}.json?limit=100")
             resp.raise_for_status()
             data = resp.json()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("Jolpica session fetch failed: %s", exc)
-            return {"session_key": None, "source": "error", "error": str(exc)}
+            # OpenF1 alone is still enough to key the OpenF1-backed panels.
+            return {
+                "session_key":        openf1.get("session_key"),
+                "openf1_session_key": openf1.get("session_key"),
+                "session_name":       openf1.get("session_name"),
+                "session_type":       openf1.get("session_type"),
+                "round":              None,
+                "circuit":            None,
+                "year":               year,
+                "is_live":            openf1.get("is_live", False),
+                "source":             "openf1_only",
+                "error":              str(exc),
+            }
 
     races = data.get("MRData", {}).get("RaceTable", {}).get("Races", [])
     if not races:
-        return {"session_key": None, "source": "no_sessions"}
+        return {
+            "session_key":        openf1.get("session_key"),
+            "openf1_session_key": openf1.get("session_key"),
+            "round":              None,
+            "year":               year,
+            "source":             "no_sessions",
+        }
 
-    # Find the current or most recent race weekend
+    # Current weekend = FP1 date .. race date inclusive.
     matched = None
     for race in races:
         race_date = (race.get("date") or "")[:10]
-        # Check FP1 date as the weekend start
         fp1_date = (race.get("FirstPractice", {}).get("date") or race_date)[:10]
         if fp1_date <= today_str <= race_date:
             matched = race
             break
 
-    # Fall back to most recent past race
     if not matched:
         past = [r for r in races if (r.get("date") or "")[:10] <= today_str]
-        matched = past[-1] if past else races[-1]
+        matched = past[-1] if past else races[0]
 
-    round_num = matched.get("round", "0")
-    circuit   = matched.get("Circuit", {})
+    round_num = int(matched.get("round", 0) or 0)
+    circuit = matched.get("Circuit", {})
 
-    # Determine which session is current/most recent
-    session_map = [
-        ("SprintQualifying", matched.get("SprintQualifying", {})),
-        ("Sprint",           matched.get("Sprint", {})),
-        ("Qualifying",       matched.get("Qualifying", {})),
-        ("Race",             {"date": matched.get("date"), "time": matched.get("time")}),
-    ]
-    current_session_name = "Race"
-    for label, sess in reversed(session_map):
-        sess_date = (sess.get("date") or "")[:10]
-        if sess_date and sess_date <= today_str:
-            current_session_name = label
-            break
+    # Prefer OpenF1's own session naming; fall back to the Jolpica schedule.
+    session_name = openf1.get("session_name")
+    if not session_name:
+        schedule = [
+            ("Practice 1",        matched.get("FirstPractice", {})),
+            ("Practice 2",        matched.get("SecondPractice", {})),
+            ("Practice 3",        matched.get("ThirdPractice", {})),
+            ("Sprint Qualifying", matched.get("SprintQualifying", {})),
+            ("Sprint",            matched.get("Sprint", {})),
+            ("Qualifying",        matched.get("Qualifying", {})),
+            ("Race",              {"date": matched.get("date")}),
+        ]
+        session_name = "Race"
+        for label, sess in reversed(schedule):
+            sess_date = (sess.get("date") or "")[:10]
+            if sess_date and sess_date <= today_str:
+                session_name = label
+                break
 
     return {
-        "session_key":  int(round_num),   # use round as stable session identifier
-        "session_name": current_session_name,
-        "circuit":      circuit.get("circuitId"),
-        "circuit_name": circuit.get("circuitName"),
-        "year":         int(year),
-        "round":        int(round_num),
-        "race_name":    matched.get("raceName"),
-        "source":       "jolpica",
+        "session_key":        openf1.get("session_key"),
+        "openf1_session_key": openf1.get("session_key"),
+        "session_name":       session_name,
+        "session_type":       openf1.get("session_type"),
+        "round":              round_num,
+        "circuit":            circuit.get("circuitId"),
+        "circuit_name":       circuit.get("circuitName"),
+        "race_name":          matched.get("raceName"),
+        "year":               year,
+        "is_live":            openf1.get("is_live", False),
+        "source":             "jolpica+openf1" if openf1.get("session_key") else "jolpica",
     }
-
 
 
 @app.get("/api/openf1/status")
 async def openf1_status():
     """
-    OpenF1 now requires paid subscription — returns unavailable.
-    Historical and real-time data both require auth as of mid-2026.
-    Live timing comes from F1 SignalR feed (free, no auth).
-    Historical data falls back to Jolpica/Ergast (free, no auth).
+    Live reachability probe for OpenF1.
+
+    This used to hardcode {"reachable": False, "note":
+    "openf1_requires_subscription_since_2026"}. That was wrong: OpenF1's
+    historical endpoints (/drivers, /laps, /stints, /pit, /location,
+    /intervals, /position, /session_result, /team_radio) all answer 200 with no
+    API key — verified against 2026 sessions on 2026-10-11. Acting on the false
+    assumption had disabled every OpenF1-backed feature in the app.
+
+    Live *real-time* streaming still comes from the F1 SignalR feed; OpenF1 is
+    used for post-session and replay data.
     """
-    return {"reachable": False, "note": "openf1_requires_subscription_since_2026"}
+    async with httpx.AsyncClient(timeout=6) as client:
+        try:
+            resp = await client.get(f"{OPENF1_BASE}/sessions", params={"year": date.today().year})
+            ok = resp.status_code == 200
+            return {
+                "reachable": ok,
+                "status":    resp.status_code,
+                "note":      "historical endpoints are free, no key required",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"reachable": False, "status": None, "note": str(exc)}
 
 
 @app.get("/api/openf1/{path:path}")
 async def openf1_proxy(path: str, request: Request):
     """
-    Transparent proxy for OpenF1 API.
-    Historical data (2023+) is FREE — no API key needed.
-    Real-time data requires paid subscription — we use F1 SignalR for live data instead.
+    Transparent proxy for the OpenF1 API (avoids browser CORS).
+    Historical endpoints are free and need no API key — verified 2026-10-11.
+    Real-time streaming still comes from the F1 SignalR feed.
 
     Frontend calls: GET /api/openf1/v1/stints?session_key=123
     Backend calls:  GET https://api.openf1.org/v1/stints?session_key=123

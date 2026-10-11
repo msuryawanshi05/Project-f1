@@ -52,8 +52,12 @@ const useF1Store = create((set, get) => ({
   compareTelemetryDriver: null,
   // ── Radio playback ──────────────────────────────────────────────────────────
   playingRadioId: null,
-  // ── Phase 6: Session key (from OpenF1) ──────────────────────────────────────
+  // ── Session identifiers ─────────────────────────────────────────────────────
+  // currentSessionKey is a REAL OpenF1 session key (a five-digit id), safe to
+  // pass as ?session_key=. It used to hold the Jolpica round number, which
+  // OpenF1 answers with 404 — that silently broke every OpenF1-backed panel.
   currentSessionKey: null,
+  currentRound: null,       // Jolpica round number — never an OpenF1 key
   // ── Phase 6: Per-driver best lap times (for qualifying mode) ────────────────
   bestLaps: {},       // { [driverNumber]: bestLapSeconds }
 
@@ -262,6 +266,8 @@ const useF1Store = create((set, get) => ({
 
   // ── Phase 6: Session key ────────────────────────────────────────────────────
   setCurrentSessionKey: (key) => set({ currentSessionKey: key }),
+
+  setCurrentRound: (round) => set({ currentRound: round }),
 
   pitStops: [],
   addPitStop: (stop) =>

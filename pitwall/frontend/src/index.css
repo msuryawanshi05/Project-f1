@@ -152,10 +152,22 @@ html:not(.dark) body {
    ================================================================== */
 .timing-number {
   font-family: 'Orbitron', 'JetBrains Mono', monospace;
-  font-size: 12px;
   letter-spacing: 0.03em;
   font-weight: 500;
+  /* Fixed-advance digits: without this, timing values shift horizontally as
+     digits change (1 is narrower than 8 in Orbitron) and the whole tower
+     jitters every update. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  /* Never wrap or ellipsize a lap time — a half-shown time is worse than a
+     scrollbar. Column minimums live in utils/layoutConstants.js. */
+  white-space: nowrap;
 }
+
+/* NOTE: `font-size` deliberately NOT set here. It used to be hardcoded to 12px,
+   which overrode the `text-[11px]` utility on every timing cell and pushed
+   sector times past their column width — that is what clipped "47.294" to
+   "47.29". Size is the caller's decision. */
 .display-font {
   font-family: 'Rajdhani', 'Barlow Condensed', sans-serif;
   font-weight: 700;
@@ -199,6 +211,9 @@ html:not(.dark) .countdown-unit {
 .sector-green  { color: var(--pw-green); }
 .sector-yellow { color: var(--pw-yellow); }
 .sector-white  { color: var(--pw-text); }
+/* Segment status 2064 — pit lane / not competitively timed. Muted so an in-pit
+   mini-sector never reads as a performance colour. */
+.sector-pit    { color: var(--pw-ghost); }
 
 html.dark .sector-purple { text-shadow: 0 0 8px rgba(180, 104, 255, 0.35); }
 html.dark .sector-green  { text-shadow: 0 0 8px rgba(0, 210, 190, 0.35); }
@@ -278,6 +293,13 @@ html.dark .sector-yellow { text-shadow: 0 0 8px rgba(255, 242, 0, 0.25); }
    ================================================================== */
 .driver-row:hover {
   background-color: var(--pw-surface-2) !important;
+}
+
+/* Tower-wide fixed-advance digits so positions, gaps and pit counts don't
+   reflow on every timing update either. */
+.driver-row {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
 }
 
 /* ==================================================================

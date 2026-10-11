@@ -11,8 +11,21 @@ export default function StatusBar() {
   // Determine if there is a live session
   const isLive = session.phase !== 'PRE' && ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
 
-  // Find recent flag / delay / incident / weather message in raceControl
+  // Find a RECENT flag / delay / incident / weather message in raceControl.
+  //
+  // This used to scan all 50 retained messages with no time bound, so a
+  // "SAFETY CAR" or "START PROCEDURE" line from an hour earlier kept a
+  // persistent orange NOTICE badge pinned to the status bar and spliced its
+  // stale text into the label of whatever flag was *currently* flying. Same
+  // class of bug that was fixed for BroadcastBanner in efe1495.
+  const RC_FRESH_MS = 5 * 60 * 1000
+
   const delayOrFlagMsg = raceControl.find((m) => {
+    const ts = m.time ? Date.parse(m.time) : NaN
+    // Drop anything older than the freshness window. A message with an
+    // unparseable timestamp is not assumed fresh.
+    if (!Number.isFinite(ts) || Date.now() - ts > RC_FRESH_MS) return false
+
     const txt = (m.message ?? m.msg ?? '').toUpperCase()
     return (
       txt.includes('DELAY') ||

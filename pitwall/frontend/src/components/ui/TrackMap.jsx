@@ -40,9 +40,17 @@ function renderCircuit(canvas, coordinates, W, H, progress = 1, circuitData = nu
   const limit = Math.max(1, Math.floor(pts.length * progress))
 
   const L = pts.length
-  const splits = circuitData?.sector_splits || [0.33, 0.66]
-  const s1End = Math.floor(L * splits[0])
-  const s2End = Math.floor(L * splits[1])
+  // Sector shading requires REAL split fractions for this circuit. There is no
+  // sane default: GeoJSON vertices are not equidistant (dense through corners,
+  // sparse on straights), so an index fraction is not a distance fraction, and
+  // real splits are nowhere near thirds of a lap. When sector_splits is null we
+  // draw the track in a single neutral colour rather than shading three
+  // confidently-wrong sectors.
+  const splits = Array.isArray(circuitData?.sector_splits) && circuitData.sector_splits.length === 2
+    ? circuitData.sector_splits
+    : null
+  const s1End = splits ? Math.floor(L * splits[0]) : L - 1
+  const s2End = splits ? Math.floor(L * splits[1]) : L - 1
 
   const p1Start = 0
   const p1End = Math.min(limit - 1, s1End)
@@ -86,12 +94,12 @@ function renderCircuit(canvas, coordinates, W, H, progress = 1, circuitData = nu
   ctx.stroke()
 
   // 2. Draw Sector Glows (Neon style)
-  // Sector 1
-  if (drawSegment(p1Start, p1End)) {
+  // Sector 1 — or, when splits are unknown, the entire lap in neutral grey
+  if (drawSegment(p1Start, p1End, !splits)) {
     ctx.save()
-    ctx.shadowColor = 'rgba(255, 46, 46, 0.4)'
+    ctx.shadowColor = splits ? 'rgba(255, 46, 46, 0.4)' : 'rgba(170, 170, 170, 0.3)'
     ctx.shadowBlur  = 10
-    ctx.strokeStyle = 'rgba(255, 46, 46, 0.25)'
+    ctx.strokeStyle = splits ? 'rgba(255, 46, 46, 0.25)' : 'rgba(170, 170, 170, 0.2)'
     ctx.lineWidth   = 5
     ctx.lineJoin = 'round'; ctx.lineCap = 'round'
     ctx.stroke()
@@ -121,9 +129,9 @@ function renderCircuit(canvas, coordinates, W, H, progress = 1, circuitData = nu
   }
 
   // 3. Draw Sector Stripes
-  // Sector 1: Red
-  if (drawSegment(p1Start, p1End)) {
-    ctx.strokeStyle = '#ff2e2e'
+  // Sector 1: Red — neutral grey when sector splits are unknown
+  if (drawSegment(p1Start, p1End, !splits)) {
+    ctx.strokeStyle = splits ? '#ff2e2e' : '#9aa0a6'
     ctx.lineWidth   = 2.5
     ctx.lineJoin = 'round'; ctx.lineCap = 'round'
     ctx.stroke()

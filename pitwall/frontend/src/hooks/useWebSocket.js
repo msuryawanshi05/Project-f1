@@ -51,6 +51,7 @@ export function useWebSocket() {
     setWeather,
     addRaceControl,
     setCurrentSessionKey,
+    setCurrentRound,
     updateBestLap,
     updateGapHistory,
     resetLiveSession,
@@ -79,7 +80,12 @@ export function useWebSocket() {
           ...cur,
           ...data,
           name: isFormationOrActive && (!data.name || data.name === 'Unknown') ? 'FORMATION LAP' : (data.name || cur.name),
-          lap: isPre ? null : (data.lap ?? cur.lap ?? 0),
+          // NEVER coalesce to 0. The backend always sends data.lap === null
+          // (SessionInfo/SessionData carry no lap number — only LapCount does),
+          // and cur.lap starts as null, so `data.lap ?? cur.lap ?? 0` evaluated
+          // to a literal 0 and the header rendered "LAP 0/53" mid-race.
+          // null means "unknown" and renders as an em dash.
+          lap: isPre ? null : (data.lap ?? cur.lap ?? null),
           total_laps: data.total_laps ?? cur.total_laps,
           phase: incomingPhase,
         })
@@ -104,6 +110,21 @@ export function useWebSocket() {
             setSession({ ...cur, phase: 'LIVE' })
           }
         }
+        // Lap-count fallback: LapCount is the authoritative source, but it can
+        // arrive late or be missing in some session types. The race leader's
+        // NumberOfLaps is equivalent, so use it until LapCount lands rather
+        // than leaving the lap counter blank.
+        {
+          const sess = useF1Store.getState().session
+          if (sess.lap == null && sess.phase !== 'PRE') {
+            const leaderLap = drivers.reduce((max, d) => {
+              const n = Number(d.lap)
+              return Number.isFinite(n) && n > max ? n : max
+            }, 0)
+            if (leaderLap >= 1) setSession({ ...sess, lap: leaderLap })
+          }
+        }
+
         // Accumulate best laps for qualifying mode
         drivers.forEach((d) => {
           if (d.last_lap) {
@@ -170,16 +191,17 @@ export function useWebSocket() {
     }
   }
 
-  // ── Fetch current session key from backend ────────────────────────────────
+  // ── Resolve the current OpenF1 session key + Jolpica round ────────────────
+  // session_key is an OpenF1 key, not a round number. It changes with every
+  // session in a weekend (FP1 -> FP2 -> ... -> Race), so this re-runs whenever
+  // the live session name changes, not just once on connect.
   async function fetchCurrentSession() {
     try {
       const res = await fetch(`${API_BASE}/api/current-session`)
-      if (res.ok) {
-        const json = await res.json()
-        if (json.session_key) {
-          setCurrentSessionKey(json.session_key)
-        }
-      }
+      if (!res.ok) return
+      const json = await res.json()
+      if (json.session_key != null) setCurrentSessionKey(json.session_key)
+      if (json.round != null) setCurrentRound(json.round)
     } catch (_e) {
       // Network error fetching session — non-critical, silent in production
     }
@@ -240,6 +262,15 @@ export function useWebSocket() {
       ws.close()
     }
   }
+
+  // Re-resolve the OpenF1 session key whenever the live session rolls over
+  // (FP1 -> FP2 -> Qualifying -> Race), so OpenF1-backed panels follow along.
+  const sessionName = useF1Store((s) => s.session.name)
+  useEffect(() => {
+    if (!sessionName) return
+    fetchCurrentSession()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionName])
 
   useEffect(() => {
     connect()

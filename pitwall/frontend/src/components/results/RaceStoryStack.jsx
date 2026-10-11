@@ -92,7 +92,9 @@ export default function RaceStoryStack({ raceData, sessionKey, onClose }) {
     }, 100)
   }, [])
 
-  // NOTE: OpenF1 race_control now requires paid subscription (returns 401).
+  // NOTE: OpenF1 /v1/race_control is free and returns 200 (verified 2026-10-11,
+  // 64 rows for session_key 11384). Wiring it up is a Tier 2 task; it needs a
+  // real OpenF1 session key passed down from store.currentSessionKey.
   // We fall back immediately to the Jolpica/results-derived story events.
   useEffect(() => {
     let cancelled = false

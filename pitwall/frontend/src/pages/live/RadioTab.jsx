@@ -4,17 +4,18 @@ import useF1Store from '../../store/useF1Store'
 import { getTeamColour, degreesToCompass } from '../../utils/driverUtils'
 import { EmptyState } from '../../components/ui/EmptyState'
 
-// ── Audio manager — supports HTML5 Audio and Web Audio + Speech Synthesis ──────
-const audioRef = { current: null, timer: null, ctx: null }
+// ── Audio manager ─────────────────────────────────────────────────────────────
+// Plays ONLY real recording_url values returned by OpenF1 /v1/team_radio.
+// There is deliberately no synthetic/simulated fallback: this panel used to
+// inject canned driver quotes with speech-synthesis audio every 35 s during a
+// live session, labelled identically to real intercepts. Fans could not tell
+// the two apart. An empty feed is correct; an invented one is not.
+const audioRef = { current: null }
 
-function playClip(url, id, setPlayingId, text = "", driverNum = null) {
+function playClip(url, id, setPlayingId) {
+  if (!url) return
   stopClip(setPlayingId)
   
-  if (url === 'mock-audio') {
-    playSyntheticRadio(text, setPlayingId, id, driverNum)
-    return
-  }
-
   const a = new Audio(url)
   audioRef.current = a
   setPlayingId(id)
@@ -23,139 +24,7 @@ function playClip(url, id, setPlayingId, text = "", driverNum = null) {
   a.onerror = () => setPlayingId(null)
 }
 
-function playSyntheticRadio(text, setPlayingId, id, driverNum = null) {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext
-    if (!AudioContext) return
-    
-    // Stop any ongoing speech
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel()
-    }
-
-    const ctx = new AudioContext()
-    audioRef.ctx = ctx
-    setPlayingId(id)
-
-    // F1 radio beep sound (sine wave beep at 950Hz)
-    const playBeep = (time, freq = 950, dur = 0.08) => {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(freq, time)
-      gain.gain.setValueAtTime(0.015, time)
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + dur)
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.start(time)
-      osc.stop(time + dur)
-    }
-
-    const startTime = ctx.currentTime
-    // Initial beep
-    playBeep(startTime)
-
-    // Speech duration calculation (approx 140 words per minute)
-    const wordCount = text ? text.split(' ').length : 8
-    const speechDuration = Math.max(2.5, (wordCount / 140) * 60)
-    const totalDuration = speechDuration + 0.5 // add space for beeps
-
-    // Radio static noise
-    const bufferSize = ctx.sampleRate * totalDuration
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
-    const data = buffer.getChannelData(0)
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * 0.008 // static gain
-    }
-    
-    const noiseSource = ctx.createBufferSource()
-    noiseSource.buffer = buffer
-    
-    // Bandpass filter to mimic radio speech spectrum
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'bandpass'
-    filter.frequency.value = 1100
-    filter.Q.value = 1.4
-    
-    noiseSource.connect(filter)
-    filter.connect(ctx.destination)
-    noiseSource.start(startTime + 0.08)
-    
-    // Stop noise slightly before end beep
-    noiseSource.stop(startTime + totalDuration - 0.1)
-
-    // Trigger Speech Synthesis
-    if (window.speechSynthesis && text) {
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.rate = 0.95
-      utterance.pitch = 0.85 // slightly lower pitch for radio feel
-      
-      const voices = window.speechSynthesis.getVoices()
-      const enVoices = voices.filter(v => v.lang.startsWith('en') || v.lang.startsWith('EN'))
-      
-      if (enVoices.length > 0) {
-        const driverStr = String(driverNum)
-        const isUK = ['44', '63', '4', '41', '23'].includes(driverStr)
-        const isAUS = ['81', '3'].includes(driverStr)
-        
-        let selectedVoice = null
-        if (isUK) {
-          selectedVoice = enVoices.find(v => v.lang.includes('GB') && v.name.toLowerCase().includes('google'))
-            || enVoices.find(v => v.lang.includes('GB') && v.name.toLowerCase().includes('natural'))
-            || enVoices.find(v => v.lang.includes('GB'))
-        } else if (isAUS) {
-          selectedVoice = enVoices.find(v => v.lang.includes('AU') && v.name.toLowerCase().includes('google'))
-            || enVoices.find(v => v.lang.includes('AU') && v.name.toLowerCase().includes('natural'))
-            || enVoices.find(v => v.lang.includes('AU'))
-        }
-        
-        if (!selectedVoice) {
-          selectedVoice = enVoices.find(v => v.name.toLowerCase().includes('google') || v.name.toLowerCase().includes('natural'))
-            || enVoices.find(v => v.name.toLowerCase().includes('zira'))
-            || enVoices.find(v => v.name.toLowerCase().includes('david'))
-            || enVoices[0]
-        }
-        
-        if (selectedVoice) {
-          utterance.voice = selectedVoice
-        }
-      }
-
-      // Start speaking after the initial beep finishes
-      setTimeout(() => {
-        if (audioRef.ctx) { // only speak if not cancelled/stopped
-          window.speechSynthesis.speak(utterance)
-        }
-      }, 150)
-    }
-
-    // End beep
-    playBeep(startTime + totalDuration - 0.08, 850, 0.08)
-
-    audioRef.timer = setTimeout(() => {
-      setPlayingId(null)
-      stopClip(setPlayingId)
-    }, totalDuration * 1000)
-    
-  } catch (e) {
-    setPlayingId(null)
-  }
-}
-
 function stopClip(setPlayingId) {
-  if (window.speechSynthesis) {
-    window.speechSynthesis.cancel()
-  }
-  if (audioRef.timer) {
-    clearTimeout(audioRef.timer)
-    audioRef.timer = null
-  }
-  if (audioRef.ctx) {
-    try {
-      audioRef.ctx.close()
-    } catch (_) {}
-    audioRef.ctx = null
-  }
   if (audioRef.current) {
     try {
       audioRef.current.pause()
@@ -369,69 +238,6 @@ function RadioCard({ entry, isPlaying, onPlay, onStop, drivers }) {
 }
 
 // ── Radio Tab ─────────────────────────────────────────────────────────────────
-const LIVE_RADIO_TRANSMISSIONS = [
-  {
-    driver_number: 1,
-    code: "NOR",
-    message: "Lots of spray behind the pack. Keep me updated on visibility and turn 15 water.",
-  },
-  {
-    driver_number: 44,
-    code: "HAM",
-    message: "Car feels balanced on the intermediates. Let's see how the track develops.",
-  },
-  {
-    driver_number: 3,
-    code: "VER",
-    message: "Brake temperatures are dropping behind the safety car, picking up the pace.",
-  },
-  {
-    driver_number: 16,
-    code: "LEC",
-    message: "Standing water on the exit of turn 4 and turn 11. Very low traction.",
-  },
-  {
-    driver_number: 12,
-    code: "ANT",
-    message: "Radio check, loud and clear. Tyre blankets off, inters feel good.",
-  },
-  {
-    driver_number: 6,
-    code: "HAD",
-    message: "Understood, delta is positive. Managing temperatures on the formation lap.",
-  },
-  {
-    driver_number: 81,
-    code: "PIA",
-    message: "Track surface is greasy, front tyres taking time to switch on.",
-  },
-  {
-    driver_number: 63,
-    code: "RUS",
-    message: "Copy that, safety car speed is okay now. Ready for race start.",
-  },
-  {
-    driver_number: 14,
-    code: "ALO",
-    message: "Good morning guys, let's have a clean start. Inters are the right call.",
-  },
-  {
-    driver_number: 5,
-    code: "BOR",
-    message: "Confirming engine mode 2 for the start procedure. All systems normal.",
-  },
-  {
-    driver_number: 55,
-    code: "SAI",
-    message: "Understeer in turn 8, but car is drivable. Let's keep our heads down.",
-  },
-  {
-    driver_number: 10,
-    code: "GAS",
-    message: "Visibility is zero into turn 1 if you are right behind someone.",
-  }
-]
-
 export default function RadioTab() {
   const session        = useF1Store((s) => s.session)
   const weather        = useF1Store((s) => s.weather)
@@ -518,34 +324,6 @@ export default function RadioTab() {
     return () => clearInterval(fetchInterval)
   }, [isLive, sessionKey, fetchRealRadio])
 
-  // Simulated live interceptor: only injects during active live race/formation lap
-  useEffect(() => {
-    if (!isLive) return
-    
-    const interval = setInterval(() => {
-      setRadioClips((prev) => {
-        // If we have successfully loaded real clips, stop injecting simulated clips!
-        const hasRealClips = prev.some((c) => String(c.id).startsWith('real-r-'))
-        if (hasRealClips) return prev
-        
-        const rand = LIVE_RADIO_TRANSMISSIONS[Math.floor(Math.random() * LIVE_RADIO_TRANSMISSIONS.length)]
-        const d = drivers.find((drv) => String(drv.number) === String(rand.driver_number)) ?? {}
-        const code = d.short_name ?? d.code ?? rand.code
-        
-        const newClip = {
-          ...rand,
-          id: `sim-r-${Date.now()}-${rand.driver_number}`,
-          date: new Date().toISOString(),
-          lap: session.lap ? `LAP ${session.lap}` : isFormationLap ? 'FORMATION LAP' : 'LAP 1',
-          recording_url: 'mock-audio',
-        }
-        return [newClip, ...prev].slice(0, 20)
-      })
-    }, 35000)
-
-    return () => clearInterval(interval)
-  }, [isLive, session.lap, isFormationLap, drivers])
-
   // Auto-scroll to top when a new clip arrives
   useEffect(() => {
     if (feedRef.current) {
@@ -553,8 +331,8 @@ export default function RadioTab() {
     }
   }, [radioClips.length])
 
-  function handlePlay(url, id, text, driverNum) {
-    playClip(url, id, setPlayingId, text, driverNum)
+  function handlePlay(url, id) {
+    playClip(url, id, setPlayingId)
   }
   
   function handleStop() {
@@ -569,7 +347,7 @@ export default function RadioTab() {
           <EmptyState
             icon="📻"
             title="Radio Feed Standby"
-            message="Team radio transmissions will be intercepted during the live race session only."
+            message="Team radio is published by OpenF1 during and shortly after a live session. Nothing is shown outside one."
             className="w-full my-0"
           />
           <div className="bg-pitwall-surface border border-pitwall-border p-4 rounded-sm flex flex-col justify-center">
@@ -597,8 +375,8 @@ export default function RadioTab() {
             <div className="flex flex-col items-center justify-center h-full bg-carbon px-4">
               <EmptyState
                 icon="📻"
-                title="Radio Transmissions Offline"
-                message={isLive ? "Radio intercept active. Awaiting team transmissions from the pitlane..." : "Radio transmissions available during live sessions only."}
+                title="Awaiting Transmissions"
+                message="Connected to the team radio feed. Clips appear here as they are published — only genuine recordings are ever shown."
               />
             </div>
           ) : (
@@ -607,7 +385,7 @@ export default function RadioTab() {
                 key={clip.id ?? i}
                 entry={clip}
                 isPlaying={playingId === (clip.id ?? clip.date)}
-                onPlay={(url, id) => handlePlay(url, id, clip.message, clip.driver_number)}
+                onPlay={(url, id) => handlePlay(url, id)}
                 onStop={handleStop}
                 drivers={drivers}
               />

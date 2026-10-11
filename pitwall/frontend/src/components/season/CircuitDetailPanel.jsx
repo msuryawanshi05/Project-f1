@@ -173,7 +173,7 @@ export default function CircuitDetailPanel({ race, circuitData, onClose }) {
             <StatRow label="Race Distance"   value={`${raceLen} km`} />
             <StatRow label="Lap Count"       value={`${circuitData.laps} laps`} />
             <StatRow label="Lap Record"      value={`${circuitData.lap_record ?? '—'} — ${circuitData.lap_record_holder ?? '?'} (${circuitData.lap_record_year ?? '?'})`} />
-            <StatRow label="MOM Zones"       value={circuitData.drs_zones ?? '—'} />
+            <StatRow label="Overtake Zones"  value={circuitData.overtake_zones ?? '—'} />
             <StatRow label="City"            value={`${circuitData.city}, ${circuitData.country}`} />
           </section>
         )}

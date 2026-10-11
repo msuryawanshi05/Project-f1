@@ -85,14 +85,25 @@ export function getTrackStatus(statusCode) {
 }
 
 /**
- * Map segment colour code integer to CSS class name string.
+ * Map an F1 mini-sector segment status code to a colour name.
+ *
+ * Verified empirically against 9,669 real mini-sector values from Baku 2026
+ * Qualifying (OpenF1 /v1/laps, session_key 11391):
+ *   2048 -> 5118 occurrences (most common => slower than own best)
+ *   2049 -> 3926             (personal best)
+ *   2051 ->  321             (rare; 12 on the session's fastest lap => purple)
+ *   2064 ->  190             (seen on an 822 s in-pit lap => pit lane)
+ *
+ * 2048 and 2051 were previously swapped here and in signalr_client.py, which
+ * drew every purple mini-sector yellow and vice versa. Keep this in sync with
+ * _SEGMENT_COLOUR in backend/signalr_client.py.
  */
 export function getSegmentColour(code) {
   const map = {
-    2048: 'purple',  // fastest overall
+    2048: 'yellow',  // slower than this driver's own best
     2049: 'green',   // personal best
-    2051: 'yellow',  // slower than personal best
-    2064: 'white',   // pit lane / SC period
+    2051: 'purple',  // fastest overall in the session
+    2064: 'pit',     // pit lane / not timed
   }
   return map[code] ?? 'white'
 }

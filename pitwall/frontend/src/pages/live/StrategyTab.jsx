@@ -217,8 +217,11 @@ export default function StrategyTab() {
 
   const weekendState = useRaceWeekendState()
   const circuitLaps  = weekendState.circuitData?.laps
-  const totalLaps    = session.total_laps || circuitLaps || 60
-  const currentLap   = session.lap ?? 0
+  // No invented fallback (was `|| 60`): circuitLaps is null for circuits with
+  // no verified lap count, and a guessed total silently rescales every stint
+  // bar on the timeline.
+  const totalLaps    = session.total_laps || circuitLaps || null
+  const currentLap   = session.lap ?? null
 
   // Sort drivers by current race position
   const sortedTimings = useMemo(
@@ -252,7 +255,7 @@ export default function StrategyTab() {
         map[num].push({
           ...t,
           lap_start: 1,
-          lap_end: currentLap || 1,
+          lap_end: currentLap ?? 1,
         })
       }
     })

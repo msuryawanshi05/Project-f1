@@ -221,7 +221,18 @@ All responses are **arrays of objects**. Filter using query params.
 | `st_speed` | integer\|null | speed trap finish km/h |
 
 > [!NOTE]
-> Segment colour codes: `2048`=purple, `2049`=green, `2051`=yellow, `2064`=white (pit/SC). The frontend timing tower needs this mapping.
+> Segment colour codes: `2048`=**yellow** (slower than own best), `2049`=**green** (personal best),
+> `2051`=**purple** (fastest overall), `2064`=**pit lane / not timed**.
+>
+> Verified empirically on 2026-10-11 against 9,669 real mini-sector values from
+> Baku 2026 Qualifying (`session_key=11391`): 2048 occurs 5,118 times (by far the most
+> common, so it cannot be purple), 2049 3,926 times, 2051 only 321 times — twelve of
+> which fall on the session's fastest lap. 2064 appears on an 822 s in-pit lap.
+>
+> An earlier revision of this table had `2048` and `2051` swapped, and that error was
+> copied into `signalr_client.py` and `driverUtils.js`. Re-run the count before
+> changing it back. Canonical copy: `_SEGMENT_COLOUR` in `backend/signalr_client.py`,
+> regression-tested by `backend/test_clean_timing.py`.
 
 ### Stints — `GET /stints?session_key=<key>`
 
@@ -401,13 +412,13 @@ summary.thumbnail.source, summary.coordinates
 | Jolpica | Pit stop data may lag 30–60 min after race | Empty endpoint | Check `MRData.total !== "0"` before rendering |
 | Jolpica | `time` field (race start time) absent on some old rounds | Missing start time | Default to `"TBD"` |
 | Jolpica | No live data — historical only | Can't use for real-time | Use OpenF1 for live, Jolpica for historical |
-| OpenF1 | 2026 sessions return 126 results but no live data yet | Normal | Filter by `session_type === "Race"` and date |
+| OpenF1 | Historical endpoints are free; no API key needed (verified 2026-10-11) | None — earlier notes claiming a 401/paid subscription were wrong | Use OpenF1 for post-session, replay and reference data; F1 SignalR for live streaming |
 | OpenF1 | `pit_duration` / `stop_duration` often `null` | Calculated field not always available | Fall back to `lane_duration` |
 | OpenF1 | `lap_duration` is `null` for pit-out laps | Expected | Show `"OUT LAP"` in UI |
-| OpenF1 | Segment colour codes are integers, not strings | Confusing | Map: `2048`→purple, `2049`→green, `2051`→yellow, `2064`→white |
+| OpenF1 | Segment colour codes are integers, not strings | Confusing | Map: `2048`→yellow, `2049`→green, `2051`→**purple**, `2064`→pit lane. Verified empirically — see the Laps section. Canonical copy: `_SEGMENT_COLOUR` in `signalr_client.py`. |
 | Open-Meteo | No API key — but rate limits apply | Polling too fast could hit limit | Cache for 1 hour |
 | Wikipedia | Returns HTTP 403 without `User-Agent` header | Silent failure | Always set `User-Agent` header in backend proxy |
-| Wikipedia | `thumbnail` absent for some circuit articles | Missing image | Fallback to circuit SVG from f1-track-vectors |
+| Wikipedia | `thumbnail` absent for some circuit articles | Missing image | Fallback to the circuit GeoJSON in `frontend/public/trackmaps/` (OSM-traced, 25 circuits) |
 
 ---
 

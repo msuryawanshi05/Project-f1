@@ -6,7 +6,7 @@ import { formatLapTime, formatGap, getSegmentColour, resolveDriverCode, resolveD
 import { useFlashOnChange } from '../../hooks/useFlashOnChange'
 import { Tooltip } from './Tooltip'
 import useF1Store from '../../store/useF1Store'
-import teamsData from '../../data/teams.json'
+import { TOWER_GRID_TEMPLATE, TOWER_ROW_HEIGHT } from '../../utils/layoutConstants'
 
 const DriverRow = memo(function DriverRow({
   driver,
@@ -24,19 +24,6 @@ const DriverRow = memo(function DriverRow({
   const isCompact = density === 'compact'
   const driverNum = driver?.number ?? timing?.driver_number
 
-  const colWidths = {
-    pos: 'w-[6%] min-w-[28px]',
-    drv: 'w-[13%] min-w-[66px] pl-1',
-    gap: 'w-[13%] min-w-[62px]',
-    lastLap: 'w-[14%] min-w-[70px]',
-    s1: 'w-[11%] min-w-[52px] text-center',
-    s2: 'w-[11%] min-w-[52px] text-center',
-    s3: 'w-[11%] min-w-[52px] text-center',
-    tyre: 'w-[8%] min-w-[36px] text-center',
-    pit: 'w-[5%] min-w-[22px] text-center',
-    expand: 'w-[5%] min-w-[20px]',
-  }
-
   const resolved = resolveDriver(driverNum, driver ? [driver] : [])
   const code = (driver?.code && isNaN(Number(driver.code))) 
     ? driver.code 
@@ -53,10 +40,13 @@ const DriverRow = memo(function DriverRow({
     return null
   }, [timing?.last_lap_time_in_s, timing?.s1_time_in_s, timing?.s2_time_in_s, timing?.s3_time_in_s])
   const isPitting = timing?.pitting ?? false
-  const isSC      = timing?.status === 'SC'
   const lapDeleted= timing?.last_lap_deleted ?? false
   const isFastestLap = timing?.overall_fastest ?? false
-  const isRetired = timing?.stopped === true
+  // `Retired` is the terminal state. `Stopped` only means the car is stationary
+  // at this instant and clears again if the driver recovers and rejoins, so a
+  // spin used to permanently mark a running driver as RETIRED.
+  const isRetired = timing?.retired === true
+  const isStoppedOnTrack = timing?.stopped === true && !isRetired
   const isOutOfRace = isRetired || timing?.knockout === true
 
   // Derive completed pit stop count from timing or tyre stints (stint 1 = 0 stops, stint 2 = 1 stop, etc.)
@@ -140,10 +130,13 @@ const DriverRow = memo(function DriverRow({
       }}
       onClick={() => onExpand?.(driverNum)}
     >
-      <div className={`flex items-center ${isCompact ? 'h-8' : 'h-10'} gap-0 transition-colors ${rowBg}`}>
-        <div className="w-[4px] h-full self-stretch" style={{ backgroundColor: teamColour }} />
+      <div
+        className={`grid items-center ${isCompact ? TOWER_ROW_HEIGHT.compact : TOWER_ROW_HEIGHT.comfortable} transition-colors ${rowBg}`}
+        style={{ gridTemplateColumns: TOWER_GRID_TEMPLATE }}
+      >
+        <div className="h-full self-stretch" style={{ backgroundColor: teamColour }} />
 
-        <div className={`${colWidths.pos} flex-shrink-0 text-center font-display font-extrabold ${isCompact ? 'text-xs' : 'text-sm'} text-pitwall-text-strong pl-1 italic relative flex items-center justify-center transition-all duration-300`}>
+        <div className={`text-center font-display font-extrabold ${isCompact ? 'text-xs' : 'text-sm'} text-pitwall-text-strong pl-1 italic relative flex items-center justify-center transition-all duration-300`}>
           <motion.span
             animate={positionFlash ? { backgroundColor: ['rgba(232,0,45,0.3)', 'rgba(232,0,45,0)'] } : {}}
             transition={{ duration: 0.6 }}
@@ -166,7 +159,7 @@ const DriverRow = memo(function DriverRow({
           )}
         </div>
 
-        <div className={`${colWidths.drv} flex-shrink-0 flex items-center font-display font-extrabold ${isCompact ? 'text-xs' : 'text-[14px]'} uppercase pl-1 transition-all duration-300`} style={{ color: teamColour }}>
+        <div className={`flex items-center min-w-0 font-display font-extrabold ${isCompact ? 'text-xs' : 'text-[14px]'} uppercase pl-1 transition-all duration-300`} style={{ color: teamColour }}>
           {penalty && (
             <Tooltip content={penalty.message || `Penalty: ${penalty.label}`}>
               <span className="inline-flex items-center justify-center font-mono font-black text-[9px] px-1 py-0.5 rounded leading-none flex-shrink-0 bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm animate-pulse mr-1">
@@ -180,13 +173,13 @@ const DriverRow = memo(function DriverRow({
           </Tooltip>
         </div>
 
-        <div className={`${colWidths.gap} flex-shrink-0 font-mono ${isCompact ? 'text-[11px]' : 'text-xs'} text-pitwall-dim truncate transition-all duration-300`}>
+        <div className={`min-w-0 font-mono ${isCompact ? 'text-[11px]' : 'text-xs'} text-pitwall-dim truncate transition-all duration-300`}>
           {isOutOfRace ? (
             <span className="text-red-400 font-bold px-1.5 py-0.5 bg-red-900/20 border border-red-800/30 rounded-sm text-[10px] tracking-wider font-display">RETIRED</span>
+          ) : isStoppedOnTrack ? (
+            <span className="text-orange-400 font-bold px-1.5 py-0.5 bg-orange-900/20 border border-orange-800/30 rounded-sm text-[10px] tracking-wider font-display">STOPPED</span>
           ) : isPitting ? (
             <span className="text-status-yellow font-bold px-1.5 py-0.5 bg-status-yellow/10 border border-status-yellow/20 rounded-sm text-[10px] tracking-wider display-font">PIT IN</span>
-          ) : isSC ? (
-            <span className="text-status-yellow font-bold px-1.5 py-0.5 bg-status-yellow/10 border border-status-yellow/20 rounded-sm text-[10px] tracking-wider display-font">SC</span>
           ) : (
             <motion.span
               animate={gapFlash ? { backgroundColor: ['rgba(232,0,45,0.25)', 'rgba(232,0,45,0)'] } : {}}
@@ -198,7 +191,7 @@ const DriverRow = memo(function DriverRow({
           )}
         </div>
 
-        <div className={`${colWidths.lastLap} flex-shrink-0 timing-number font-bold ${isCompact ? 'text-[11px]' : 'text-xs'} ${
+        <div className={`min-w-0 timing-number font-bold ${isCompact ? 'text-[11px]' : 'text-xs'} ${
           lapColour === 'purple' ? 'sector-purple' : lapColour === 'green' ? 'sector-green' : 'sector-yellow'
         } ${lapDeleted ? 'lap-deleted' : ''} transition-all duration-300`}>
           {isPitting ? (
@@ -214,17 +207,17 @@ const DriverRow = memo(function DriverRow({
           )}
         </div>
 
-        <div className={`${colWidths.s1} flex-shrink-0 flex items-center justify-center transition-all duration-300`}>
+        <div className={`flex items-center justify-center transition-all duration-300`}>
           <SectorTime seconds={timing?.s1_time_in_s ?? timing?.sector_1?.time ?? timing?.best_sector_1_time} colourClass={s1Code} />
         </div>
-        <div className={`${colWidths.s2} flex-shrink-0 flex items-center justify-center transition-all duration-300`}>
+        <div className={`flex items-center justify-center transition-all duration-300`}>
           <SectorTime seconds={timing?.s2_time_in_s ?? timing?.sector_2?.time ?? timing?.best_sector_2_time} colourClass={s2Code} />
         </div>
-        <div className={`${colWidths.s3} flex-shrink-0 flex items-center justify-center transition-all duration-300`}>
+        <div className={`flex items-center justify-center transition-all duration-300`}>
           <SectorTime seconds={timing?.s3_time_in_s ?? timing?.sector_3?.time ?? timing?.best_sector_3_time} colourClass={s3Code} />
         </div>
 
-        <div className={`${colWidths.tyre} flex-shrink-0 flex items-center justify-center transition-all duration-300`}>
+        <div className={`flex items-center justify-center transition-all duration-300`}>
           {tyre ? (
             <Tooltip content={`${tyre.compound?.toUpperCase()} compound · ${tyre.age ?? tyre.laps ?? 0} laps old`}>
               <div>
@@ -236,7 +229,7 @@ const DriverRow = memo(function DriverRow({
           )}
         </div>
 
-        <div className={`${colWidths.pit} flex-shrink-0 text-center font-mono ${isCompact ? 'text-[11px]' : 'text-xs'} text-pitwall-dim font-bold transition-all duration-300`}>
+        <div className={`text-center font-mono ${isCompact ? 'text-[11px]' : 'text-xs'} text-pitwall-dim font-bold transition-all duration-300`}>
           <motion.span
             animate={pitCountFlash ? { backgroundColor: ['rgba(232,0,45,0.3)', 'rgba(232,0,45,0)'] } : {}}
             transition={{ duration: 0.6 }}
@@ -247,7 +240,7 @@ const DriverRow = memo(function DriverRow({
         </div>
 
         <div 
-          className={`${colWidths.expand} flex justify-center ml-auto pr-3 text-pitwall-ghost text-[10px] group-hover:text-pitwall-text-strong transition-all duration-200 transform ${expanded ? 'rotate-180' : 'rotate-0'}`}
+          className={`flex justify-center text-pitwall-ghost text-[10px] group-hover:text-pitwall-text-strong transition-all duration-200 transform ${expanded ? 'rotate-180' : 'rotate-0'}`}
           aria-label={`${expanded ? 'Collapse' : 'Expand'} driver details for ${code}`}
         >
           ▼
@@ -296,7 +289,7 @@ const DriverRow = memo(function DriverRow({
               {tyre && (
                 <div className="flex items-center gap-2 text-pitwall-dim">
                   <span className="text-pitwall-ghost font-display font-bold text-[10px] tracking-widest">TYRE INFO:</span>
-                  <span className="font-bold text-pitwall-text-strong timing-number">{tyre.compound?.toUpperCase()} · {tyre.age ?? '—'} LAPS {tyre.is_new ? '(NEW)' : ''}</span>
+                  <span className="font-bold text-pitwall-text-strong timing-number">{tyre.compound?.toUpperCase()} · {tyre.age ?? '—'} LAPS {(tyre.new_tyre ?? tyre.is_new) ? '(NEW)' : ''}</span>
                 </div>
               )}
             </div>
@@ -306,7 +299,20 @@ const DriverRow = memo(function DriverRow({
     </motion.div>
   )
 }, (prev, next) =>
+  // Every field compared here is one the row RENDERS. Omitting a rendered field
+  // means the row keeps a stale value until some other field happens to change
+  // — which is how sector colours and knockout state used to go unnoticed.
   prev.timing?.last_lap_time_in_s === next.timing?.last_lap_time_in_s &&
+  prev.timing?.best_lap_time_in_s === next.timing?.best_lap_time_in_s &&
+  prev.timing?.s1_colour          === next.timing?.s1_colour          &&
+  prev.timing?.s2_colour          === next.timing?.s2_colour          &&
+  prev.timing?.s3_colour          === next.timing?.s3_colour          &&
+  prev.timing?.personal_fastest   === next.timing?.personal_fastest   &&
+  prev.timing?.knockout           === next.timing?.knockout           &&
+  prev.timing?.retired            === next.timing?.retired            &&
+  prev.timing?.in_pit             === next.timing?.in_pit             &&
+  prev.timing?.last_lap_deleted   === next.timing?.last_lap_deleted   &&
+  prev.timing?.speed_trap         === next.timing?.speed_trap         &&
   prev.timing?.position           === next.timing?.position           &&
   prev.timing?.gap_to_leader      === next.timing?.gap_to_leader      &&
   prev.timing?.pitting            === next.timing?.pitting            &&

@@ -20,7 +20,7 @@
 
 import { useMemo } from 'react'
 import useF1Store from '../store/useF1Store'
-import circuits from '../data/circuits.json'
+import { matchCircuit } from '../utils/circuitUtils'
 
 const SESSION_LABELS = {
   FirstPractice:    'FP1',
@@ -62,25 +62,6 @@ function buildSessions(race) {
     ...s,
     dt: new Date(`${s.date}T${s.time}`),
   }))
-}
-
-/** Match a Jolpica race to a circuits.json entry */
-function matchCircuitData(race) {
-  if (!race) return null
-  const roundMatch = circuits.find((c) => c.round === Number(race.round))
-  if (roundMatch) return roundMatch
-
-  const cName = (race.Circuit?.circuitName ?? '').toLowerCase()
-  if (cName) {
-    const cMatch = circuits.find((c) => c.circuit?.toLowerCase().includes(cName) || cName.includes(c.circuit?.toLowerCase()))
-    if (cMatch) return cMatch
-  }
-
-  const rn = (race.raceName ?? '').toLowerCase().replace(' grand prix', '').trim()
-  return circuits.find((c) => {
-    const cn = (c.name ?? '').toLowerCase().replace(' grand prix', '').trim()
-    return cn === rn || cn.includes(rn) || rn.includes(cn)
-  }) ?? null
 }
 
 export default function useRaceWeekendState() {
@@ -131,7 +112,7 @@ export default function useRaceWeekendState() {
       }
 
       const race = activeRace?.race ?? null
-      const circuitData = race ? matchCircuitData(race) : null
+      const circuitData = race ? matchCircuit(race) : null
 
       return {
         mode: 'SESSION_LIVE',
@@ -200,7 +181,7 @@ export default function useRaceWeekendState() {
     // ── ACTIVE WEEKEND ────────────────────────────────────────────────────────
     if (activeRace) {
       const { race, sessions } = activeRace
-      const circuitData = matchCircuitData(race)
+      const circuitData = matchCircuit(race)
 
       // Classify each session
       const withStatus = sessions.map((s) => {
@@ -247,7 +228,7 @@ export default function useRaceWeekendState() {
     // ── OFF WEEKEND / UPCOMING ────────────────────────────────────────────────
     if (nextFutureRace) {
       const { race, sessions } = nextFutureRace
-      const circuitData = matchCircuitData(race)
+      const circuitData = matchCircuit(race)
       const firstDt = sessions[0]?.dt
       const daysUntil = firstDt ? (firstDt - now) / 86400000 : Infinity
       const mode = daysUntil <= 7 ? 'WEEKEND_UPCOMING' : 'OFF_WEEKEND'
@@ -275,5 +256,9 @@ export default function useRaceWeekendState() {
       weekendSessions: [],
       circuitData: null,
     }
-  }, [session.phase, calendar])
+    // session.lap, raceControl and timing are all READ inside this memo
+    // (isLivePhase / isFormation), so they must be listed. Without them the
+    // mode never flipped to SESSION_LIVE when timing started arriving without
+    // an accompanying phase change.
+  }, [session.phase, session.lap, calendar, raceControl, timing])
 }

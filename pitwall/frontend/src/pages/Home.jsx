@@ -12,7 +12,7 @@ import useF1Store from '../store/useF1Store'
 import useRaceWeekendState from '../hooks/useRaceWeekendState'
 import TrackMap from '../components/ui/TrackMap'
 import RaceModal from '../components/ui/RaceModal'
-import circuits from '../data/circuits.json'
+import { matchCircuit } from '../utils/circuitUtils'
 import { getCountryAbbreviation, formatCountdown, getSafeTeamColour, getRaceStatus } from '../utils/driverUtils'
 import { useTilt } from '../hooks/useTilt'
 import { AnimatedNumber } from '../components/ui/AnimatedNumber'
@@ -143,10 +143,7 @@ function PodiumCard({ result, pos }) {
 
 // ── Compact race card (right column — clickable) ──────────────────────────────
 function RaceCard({ race, onOpen }) {
-  const cd  = circuits.find((c) =>
-    c.name?.toLowerCase().includes(race.raceName?.toLowerCase().replace(' grand prix', '').trim()) ||
-    race.raceName?.toLowerCase().includes(c.name?.toLowerCase().replace(' grand prix', '').trim())
-  )
+  const cd  = matchCircuit(race)
   const flag   = getCountryAbbreviation(race.Circuit?.Location?.country)
   const statusInfo = getRaceStatus(race)
   const isPast = statusInfo.isDone
@@ -542,10 +539,7 @@ export default function Home() {
           ) : (
             <div className="flex flex-col gap-1.5">
               {futureRaces.slice(0, 7).map((race) => {
-                const cd = circuits.find((c) =>
-                  c.name?.toLowerCase().includes(race.raceName?.toLowerCase().replace(' grand prix', '').trim()) ||
-                  race.raceName?.toLowerCase().includes(c.name?.toLowerCase().replace(' grand prix', '').trim())
-                )
+                const cd = matchCircuit(race)
                 return <RaceCard key={race.round} race={race} onOpen={(r, c) => openModal(r, c ?? cd)} />
               })}
             </div>

@@ -1,18 +1,10 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
-import circuits from '../data/circuits.json'
 import CircuitDetailPanel from '../components/season/CircuitDetailPanel'
+import { matchCircuit } from '../utils/circuitUtils'
 import { getCountryAbbreviation, getRaceStatus } from '../utils/driverUtils'
 import { MiniPodiumPreview } from '../components/ui/Tooltip'
-
-function matchCircuit(race) {
-  const rn = (race.raceName ?? '').toLowerCase().replace(' grand prix', '').trim()
-  return circuits.find((c) => {
-    const cn = (c.name ?? '').toLowerCase().replace(' grand prix', '').trim()
-    return cn.includes(rn) || rn.includes(cn)
-  })
-}
 
 export default function Season() {
   const calendar        = useF1Store((s) => s.calendar)

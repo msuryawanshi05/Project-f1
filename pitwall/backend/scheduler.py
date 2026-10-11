@@ -216,11 +216,34 @@ async def _schedule_from_jolpica():
 
 
 def _load_sessions_from_circuits_json() -> list[dict]:
-    """Fallback: load approximate times from circuits.json (race day only)."""
+    """
+    Fallback: load approximate times from circuits.json (race day only).
+
+    KNOWN LIMITATION — this fallback currently yields nothing.
+    It looks for a `race_date` or `date` key on each circuits.json entry, and
+    circuits.json has never carried either (it holds round/circuitId/laps/
+    length_km/... but no session dates — those live in the Jolpica calendar).
+    So if Jolpica is unreachable this returns an empty list and no sessions get
+    scheduled.
+
+    Left as-is deliberately: Jolpica is reliable and SignalR is also started
+    unconditionally on startup (see _schedule_from_jolpica), so a race weekend
+    is covered either way. The warnings below make the failure visible instead
+    of silent if it ever does matter.
+    """
     sessions = []
     try:
         with open(CIRCUITS_JSON, encoding="utf-8") as f:
             circuits = json.load(f)
+        if circuits and not any(
+            c.get("race_date") or c.get("date") for c in circuits
+        ):
+            logger.warning(
+                "circuits.json fallback is a no-op: none of its %d entries carry a "
+                "'race_date' or 'date' field. Session scheduling depends entirely on "
+                "the Jolpica calendar right now.",
+                len(circuits),
+            )
         for circuit in circuits:
             date_str = circuit.get("race_date") or circuit.get("date")
             if not date_str:
@@ -237,8 +260,14 @@ def _load_sessions_from_circuits_json() -> list[dict]:
                 })
             except ValueError:
                 pass
-    except (FileNotFoundError, json.JSONDecodeError):
-        logger.warning("circuits.json fallback failed")
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        logger.warning("circuits.json fallback failed: %s", exc)
+    if not sessions:
+        logger.warning(
+            "circuits.json fallback produced 0 sessions — no sessions will be "
+            "scheduled from it. SignalR still starts unconditionally on startup, so "
+            "live timing is unaffected."
+        )
     return sessions
 
 

@@ -14,6 +14,7 @@ import StrategyTab from './live/StrategyTab'
 import TelemetryTab from './live/TelemetryTab'
 import RadioTab from './live/RadioTab'
 import { useQualifyingGrid } from '../hooks/useQualifyingGrid'
+import { TOWER_COLUMNS, TOWER_GRID_TEMPLATE, TOWER_MIN_WIDTH_PX } from '../utils/layoutConstants'
 import QualifyingGridTower from '../components/ui/QualifyingGridTower'
 
 // ── Countdown inline ──────────────────────────────────────────────────────────
@@ -288,11 +289,12 @@ export default function Live() {
   const currentRound = weekendState.currentRace?.round
   const { grid: qualifyingGrid, raceInfo: qualiRaceInfo, loading: qualiLoading } = useQualifyingGrid(currentRound)
 
-  // OpenF1 stints — NOTE: OpenF1 now requires paid subscription (returns 401).
-  // Stints data during live sessions comes from the SignalR tyre feed instead.
-  // When OpenF1 free tier returns, this will work for post-session analysis.
-  const { stints: openf1Stints } = useOpenF1Stints(null)  // disabled
-  const { reachable: openf1Reachable } = useOpenF1Status() // always false
+  // Live tyre/stint data comes from the SignalR TimingAppData feed, which is
+  // authoritative during a session, so we deliberately don't fetch OpenF1
+  // stints while live. OpenF1 is free (verified 2026-10-11) and is the right
+  // source for post-session stint analysis — a Tier 2 task.
+  const { stints: openf1Stints } = useOpenF1Stints(null)
+  const { reachable: openf1Reachable, checked: openf1Checked } = useOpenF1Status()
 
   // Memoised derived data
   const sortedTiming = useMemo(() =>
@@ -419,21 +421,11 @@ export default function Live() {
   const isQ3 = sessionName.includes('Q3')
   const q1Cut = 15, q2Cut = 10
 
-  const colWidths = {
-    pos: 'w-[6%] min-w-[28px]',
-    drv: 'w-[13%] min-w-[66px] pl-1',
-    gap: 'w-[13%] min-w-[62px]',
-    lastLap: 'w-[14%] min-w-[70px]',
-    s1: 'w-[11%] min-w-[52px] text-center',
-    s2: 'w-[11%] min-w-[52px] text-center',
-    s3: 'w-[11%] min-w-[52px] text-center',
-    tyre: 'w-[8%] min-w-[36px] text-center',
-    pit: 'w-[5%] min-w-[22px] text-center',
-    expand: 'w-[5%] min-w-[20px]',
-  }
-
   const currentLap = session.lap ?? sortedTiming[0]?.lap ?? (sortedTiming.length > 0 ? 1 : null)
-  const totalLaps = session.total_laps ?? weekendState.circuitData?.laps ?? 56
+  // No invented fallback: circuitData.laps is null for circuits we have no
+  // verified lap count for (e.g. Madring), and `?? 56` would present a guess
+  // as fact. null renders as an em dash.
+  const totalLaps = session.total_laps ?? weekendState.circuitData?.laps ?? null
   const isRaceStarted = Boolean(currentLap && currentLap >= 1)
 
   const recentProcedureMsg = !isRaceStarted && raceControl.length > 0
@@ -470,8 +462,10 @@ export default function Live() {
     ? 'BEHIND SAFETY CAR'
     : isSessionActive
     ? `LAP ${currentLap ?? '—'} / ${totalLaps ?? '—'}`
+    // Before lights out there is no lap 0 — the race hasn't started. Showing
+    // "LAP 0 / 53" here was the second source of the phantom lap counter.
     : weekendState.mode === 'WEEKEND_BETWEEN_SESSIONS' || weekendState.mode === 'WEEKEND_SESSION_SOON' || weekendState.mode === 'SESSION_LIVE'
-    ? `LAP 0 / ${totalLaps ?? '—'}`
+    ? `${totalLaps ?? '—'} LAPS`
     : weekendState.nextSession?.label ?? 'UPCOMING'
 
 
@@ -515,11 +509,30 @@ export default function Live() {
           </button>
         ))}
         <div className="ml-auto flex items-center gap-3 px-4">
-          {/* OpenF1 indicator — subscription required since mid-2026 */}
-          <div className="flex items-center gap-1"
-            title="OpenF1 requires paid subscription — live timing via F1 SignalR, historical data via Jolpica">
-            <span className="w-1.5 h-1.5 rounded-full bg-pitwall-ghost opacity-40" aria-hidden="true" />
-            <span className="font-mono text-[10px] opacity-40" style={{ color: 'var(--pw-ghost)' }}>OF1</span>
+          {/* OpenF1 reachability — live probe, not a hardcoded value */}
+          <div
+            className="flex items-center gap-1"
+            title={
+              !openf1Checked
+                ? 'Checking OpenF1 reachability…'
+                : openf1Reachable
+                ? 'OpenF1 reachable — used for post-session, replay and reference data'
+                : 'OpenF1 unreachable — live timing still served by F1 SignalR'
+            }
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                !openf1Checked ? 'bg-pitwall-ghost' : openf1Reachable ? 'bg-status-green' : 'bg-pitwall-ghost'
+              }`}
+              style={{ opacity: openf1Reachable ? 1 : 0.4 }}
+              aria-hidden="true"
+            />
+            <span
+              className="font-mono text-[10px]"
+              style={{ color: 'var(--pw-ghost)', opacity: openf1Reachable ? 0.9 : 0.4 }}
+            >
+              OF1
+            </span>
           </div>
           <span className="font-mono text-xs" style={{ color: 'var(--pw-dim)' }}>{session.clock ?? '—'}</span>
         </div>
@@ -595,22 +608,27 @@ export default function Live() {
 
             {/* Timing table container — synchronized horizontal and vertical scroll */}
             <div className="flex-1 flex flex-col overflow-y-auto overflow-x-auto">
-              <div className="min-w-[480px] w-full flex flex-col flex-1">
+              <div className="w-full flex flex-col flex-1" style={{ minWidth: TOWER_MIN_WIDTH_PX }}>
                 {/* Column headers for active live race */}
                 {isSessionActive && sortedTiming.length > 0 && (
-                  <div className="sticky top-0 z-10 w-full bg-pitwall-surface-2 border-b border-pitwall-border px-4 transition-all duration-300">
-                    <div className="flex items-center h-7 px-0 w-full">
-                      <div className="w-[4px]" />
-                      <div className={`${colWidths.pos} text-center font-mono text-[10px] text-pitwall-ghost tracking-widest transition-all duration-300`}>POS</div>
-                      <div className={`${colWidths.drv} font-mono text-[10px] text-pitwall-ghost tracking-widest pl-1 transition-all duration-300`}>DRV</div>
-                      <div className={`${colWidths.gap} font-mono text-[10px] text-pitwall-ghost tracking-widest transition-all duration-300`}>GAP</div>
-                      <div className={`${colWidths.lastLap} font-mono text-[10px] text-pitwall-ghost tracking-widest transition-all duration-300`}>LAST LAP</div>
-                      <div className={`${colWidths.s1} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>S1</div>
-                      <div className={`${colWidths.s2} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>S2</div>
-                      <div className={`${colWidths.s3} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>S3</div>
-                      <div className={`${colWidths.tyre} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>TYRE</div>
-                      <div className={`${colWidths.pit} font-mono text-[10px] text-pitwall-ghost tracking-widest text-center transition-all duration-300`}>PIT</div>
-                      <div className={`${colWidths.expand} flex justify-center ml-auto pr-3`} />
+                  <div className="sticky top-0 z-10 w-full bg-pitwall-surface-2 border-b border-pitwall-border px-4">
+                    {/* Same TOWER_GRID_TEMPLATE as DriverRow — header and rows
+                        are aligned by construction, not by matching numbers. */}
+                    <div
+                      className="grid items-center h-7 w-full"
+                      style={{ gridTemplateColumns: TOWER_GRID_TEMPLATE }}
+                      role="row"
+                    >
+                      {TOWER_COLUMNS.map((col) => (
+                        <div
+                          key={col.key}
+                          role="columnheader"
+                          className="font-mono text-[10px] text-pitwall-ghost tracking-widest tabular-nums"
+                          style={{ textAlign: col.align }}
+                        >
+                          {col.label}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

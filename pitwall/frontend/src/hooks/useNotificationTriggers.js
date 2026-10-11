@@ -328,7 +328,7 @@ export default function useNotificationTriggers() {
       const wasInPit = prevInPit.current[key]
 
       // GUARD 4: Never fire pit notifications for retired / stopped drivers!
-      const isDriverRetired = retiredDrivers.current.has(key) || d.stopped === true || d.status === 'Retired' || d.status === 'Out' || d.knockout === true
+      const isDriverRetired = retiredDrivers.current.has(key) || d.retired === true || d.knockout === true
       if (isDriverRetired) {
         if (pitTimers.current[key]) {
           dismissNotification(pitTimers.current[key].notifId)
@@ -403,14 +403,19 @@ export default function useNotificationTriggers() {
   }, [timing, trackStatus, addNotification, updateNotification, dismissNotification, session, tyres, addPitStop])
 
   // ── 4. Driver retirement (fires once per driver per session) ──────────────
+  // Gated on `retired`, the terminal flag — NOT `stopped`, which only means the
+  // car is stationary at this instant and clears again when a driver spins and
+  // recovers. Using `stopped` fired an irreversible RETIREMENT popup for any
+  // off-track moment, and `retiredDrivers` is write-only so it never cleared.
   useEffect(() => {
     if (!timing.length) return
+
+    const hasRetired = (d) => d.retired === true
 
     // During hydration: silently record existing retirements so past crashes don't fire popups
     if (!isLiveReady.current) {
       timing.forEach((d) => {
-        const isNowRetired = d.stopped === true || d.status === 'Retired' || d.status === 'Out'
-        if (isNowRetired) {
+        if (hasRetired(d)) {
           retiredDrivers.current.add(String(d.number))
         }
       })
@@ -418,7 +423,7 @@ export default function useNotificationTriggers() {
     }
 
     timing.forEach((d) => {
-      const isNowRetired = d.stopped === true || d.status === 'Retired' || d.status === 'Out'
+      const isNowRetired = hasRetired(d)
       const driverKey = String(d.number)
       if (isNowRetired && !retiredDrivers.current.has(driverKey)) {
         retiredDrivers.current.add(driverKey)
@@ -426,7 +431,7 @@ export default function useNotificationTriggers() {
           dismissNotification(pitTimers.current[driverKey].notifId)
           delete pitTimers.current[driverKey]
         }
-        const resolved = resolveDriver(driverKey)
+        const resolved = resolveDriver(driverKey, useF1Store.getState().drivers)
         const driverLabel = resolved?.code ? `#${driverKey} (${resolved.code})` : `#${driverKey}`
         if (addNotification({
           id: Date.now() + Number(driverKey),

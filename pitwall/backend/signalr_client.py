@@ -10,6 +10,7 @@ The signalrcore library is synchronous/threaded — we bridge to asyncio
 via loop.call_soon_threadsafe to put items into the queue safely.
 """
 import asyncio
+import ast
 import copy
 import json
 import logging
@@ -42,14 +43,29 @@ TOPICS = [
     "DriverList",           # driver info and team colours
 ]
 
-# ── Colour / DRS maps ─────────────────────────────────────────────────────────
+# ── Mini-sector segment status codes ─────────────────────────────────────────
+# Verified empirically against 9,669 real mini-sector values from Baku 2026
+# Qualifying (OpenF1 /v1/laps, session_key 11391):
+#
+#   2048 -> 5118 occurrences  (most common by far  => slower than own best)
+#   2049 -> 3926              (                       => personal best)
+#   2051 ->  321              (rare; 12 of them on the session's fastest lap
+#                              => overall fastest, i.e. purple)
+#   2064 ->  190              (appears on an 822 s in-pit lap => pit lane)
+#
+# NOTE: 2048 and 2051 were previously swapped here, in driverUtils.js and in
+# data_shapes.md, which rendered every purple mini-sector as yellow and vice
+# versa. Do not "correct" this back without re-running that count.
 _SEGMENT_COLOUR = {
-    2048: "purple",   # personal best sector
-    2049: "green",    # faster than yellow
-    2051: "yellow",   # slower
-    2064: "white",    # pit out / safety car lap
+    2048: "yellow",   # slower than this driver's own best
+    2049: "green",    # personal best
+    2051: "purple",   # fastest overall in the session
+    2064: "pit",      # pit lane / not timed
 }
 
+# Hybrid deployment channel. In 2026 DRS is abolished and this channel reflects
+# Manual Override Mode availability; the underlying codes are unchanged. Naming
+# stays neutral ("off/available/on") so the UI can label it per-season.
 _DRS_MAP = {
     8:  "off",
     10: "available",
@@ -84,8 +100,78 @@ def parse_lap_time_to_seconds(lap_str: str) -> Optional[float]:
         return None
 
 
+def _indexed(container) -> dict:
+    """Normalise F1's dict-keyed ({"0": {...}}) or list-shaped collections to {int: dict}."""
+    if isinstance(container, dict):
+        out = {}
+        for k, v in container.items():
+            if isinstance(v, dict):
+                try:
+                    out[int(k)] = v
+                except (ValueError, TypeError):
+                    continue
+        return out
+    if isinstance(container, list):
+        return {i: v for i, v in enumerate(container) if isinstance(v, dict)}
+    return {}
+
+
+def _val(obj) -> str:
+    """TimingData leaf values arrive as {"Value": "..."} or occasionally as a bare scalar."""
+    if isinstance(obj, dict):
+        return str(obj.get("Value", "") or "")
+    if obj is None or isinstance(obj, list):
+        return ""
+    return str(obj)
+
+
+def _sector_state(sec: dict) -> str:
+    """
+    Colour for a completed sector.
+
+    The sector object carries OverallFastest / PersonalFastest booleans directly
+    (alongside Value, Status and Segments). It has NO "Colour" key -- the previous
+    implementation read seg.get("Colour"), which was always absent, so every
+    sector fell through to "yellow" and no sector ever rendered green or purple.
+    """
+    if not isinstance(sec, dict) or not _val(sec):
+        return ""
+    if sec.get("OverallFastest"):
+        return "purple"
+    if sec.get("PersonalFastest"):
+        return "green"
+    return "yellow"
+
+
+def _segment_colours(sec: dict) -> list:
+    """Per-mini-sector colours for one sector: ["green", "purple", ...] (8-10 entries)."""
+    if not isinstance(sec, dict):
+        return []
+    out = []
+    for _, seg in sorted(_indexed(sec.get("Segments")).items()):
+        try:
+            status = int(seg.get("Status", 0) or 0)
+        except (ValueError, TypeError):
+            status = 0
+        out.append(_SEGMENT_COLOUR.get(status, ""))
+    return out
+
+
+def _speed(speeds: dict, key: str):
+    """One speed-trap reading as an int km/h, or None. Keys: I1, I2, FL, ST."""
+    if not isinstance(speeds, dict):
+        return None
+    raw = _val(speeds.get(key))
+    if not raw:
+        return None
+    try:
+        return int(float(raw))
+    except (ValueError, TypeError):
+        return None
+
+
 def clean_timing(raw: dict) -> dict:
-    """TimingData → {drivers: [...]}"""
+    """TimingData -> {drivers: [...]}"""
     lines = raw.get("Lines", {})
     drivers = []
     items = lines.items() if isinstance(lines, dict) else enumerate(lines) if isinstance(lines, list) else []
@@ -94,84 +180,96 @@ def clean_timing(raw: dict) -> dict:
             continue
         num_str = str(d.get("RacingNumber") or key)
         try:
-            sectors_raw = d.get("Sectors") or {}
-            if isinstance(sectors_raw, list):
-                s1 = sectors_raw[0] if len(sectors_raw) > 0 and isinstance(sectors_raw[0], dict) else {}
-                s2 = sectors_raw[1] if len(sectors_raw) > 1 and isinstance(sectors_raw[1], dict) else {}
-                s3 = sectors_raw[2] if len(sectors_raw) > 2 and isinstance(sectors_raw[2], dict) else {}
-            elif isinstance(sectors_raw, dict):
-                s1 = sectors_raw.get("0") if isinstance(sectors_raw.get("0"), dict) else {}
-                s2 = sectors_raw.get("1") if isinstance(sectors_raw.get("1"), dict) else {}
-                s3 = sectors_raw.get("2") if isinstance(sectors_raw.get("2"), dict) else {}
-            else:
-                s1, s2, s3 = {}, {}, {}
-
-            def _seg_status(seg: dict) -> str:
-                if not isinstance(seg, dict):
-                    return ""
-                val = seg.get("Value", "")
-                clr = int(seg.get("Colour", 0)) if seg.get("Colour") else 0
-                return _SEGMENT_COLOUR.get(clr, "yellow") if val else ""
+            sectors = _indexed(d.get("Sectors"))
+            s1, s2, s3 = sectors.get(0, {}), sectors.get(1, {}), sectors.get(2, {})
+            best_sectors = _indexed(d.get("BestSectors"))
 
             last_lap_dict = d.get("LastLapTime") if isinstance(d.get("LastLapTime"), dict) else {}
-            last_lap_val = last_lap_dict.get("Value", "") if last_lap_dict else (str(d.get("LastLapTime") or "") if not isinstance(d.get("LastLapTime"), (dict, list)) else "")
-            s1_val = s1.get("Value", "") if isinstance(s1, dict) else ""
-            s2_val = s2.get("Value", "") if isinstance(s2, dict) else ""
-            s3_val = s3.get("Value", "") if isinstance(s3, dict) else ""
-            
-            last_lap_sec = parse_lap_time_to_seconds(last_lap_val)
-            s1_sec = parse_lap_time_to_seconds(s1_val)
-            s2_sec = parse_lap_time_to_seconds(s2_val)
-            s3_sec = parse_lap_time_to_seconds(s3_val)
-            
-            is_personal_fastest = bool(last_lap_dict.get("PersonalFastest", False))
-            is_overall_fastest = bool(last_lap_dict.get("OverallFastest", False))
+            last_lap_val = _val(d.get("LastLapTime"))
+            s1_val, s2_val, s3_val = _val(s1), _val(s2), _val(s3)
 
-            pos_val = d.get("Position", d.get("position", d.get("Line", 0)))
+            best_lap_obj = d.get("BestLapTime") if isinstance(d.get("BestLapTime"), dict) else {}
+            best_lap_val = _val(d.get("BestLapTime"))
+
+            s1_state, s2_state, s3_state = _sector_state(s1), _sector_state(s2), _sector_state(s3)
+
             try:
-                pos_int = int(pos_val) if pos_val else 0
+                pos_int = int(d.get("Position") or d.get("Line") or 0)
             except (ValueError, TypeError):
                 pos_int = 0
 
-            gap_ahead = d.get("IntervalToPositionAhead", {})
-            gap_ahead_val = gap_ahead.get("Value", "") if isinstance(gap_ahead, dict) else (str(gap_ahead or "") if not isinstance(gap_ahead, list) else "")
-
-            gap_leader = d.get("GapToLeader", {})
-            gap_leader_val = gap_leader.get("Value", "") if isinstance(gap_leader, dict) else (str(gap_leader or "") if not isinstance(gap_leader, list) else "")
-
             lap_val = d.get("NumberOfLaps") or d.get("Laps") or d.get("lap")
+
+            try:
+                pit_count = int(d.get("NumberOfPitStops"))
+            except (ValueError, TypeError):
+                pit_count = None
+
+            speeds = d.get("Speeds") if isinstance(d.get("Speeds"), dict) else {}
 
             drivers.append({
                 "number":        int(num_str),
-                "code":          d.get("RacingNumber", num_str),
+                # Racing number only. The 3-letter TLA lives in DriverList and is
+                # joined on the client (resolveDriver); this field is NOT a code.
+                "racing_number": int(num_str),
                 "position":      pos_int,
-                "gap_to_leader": gap_leader_val,
-                "gap_to_ahead":  gap_ahead_val,
+                "gap_to_leader": _val(d.get("GapToLeader")),
+                "gap_to_ahead":  _val(d.get("IntervalToPositionAhead")),
                 "last_lap":      last_lap_val,
                 "lap":           lap_val,
-                "sector_1":      {"time": s1_val, "status": _seg_status(s1)},
-                "sector_2":      {"time": s2_val, "status": _seg_status(s2)},
-                "sector_3":      {"time": s3_val, "status": _seg_status(s3)},
+                "sector_1":      {"time": s1_val, "status": s1_state},
+                "sector_2":      {"time": s2_val, "status": s2_state},
+                "sector_3":      {"time": s3_val, "status": s3_state},
                 "in_pit":        bool(d.get("InPit", False)),
                 "pit_out":       bool(d.get("PitOut", False)),
                 "stopped":       bool(d.get("Stopped", False)),
+                "retired":       bool(d.get("Retired", False)),
                 "knockout":      bool(d.get("KnockedOut", False)),
                 "deleted_lap":   bool(d.get("DeletedLap", False)),
                 # Frontend compatible fields
-                "last_lap_time_in_s": last_lap_sec,
-                "s1_time_in_s":       s1_sec,
-                "s2_time_in_s":       s2_sec,
-                "s3_time_in_s":       s3_sec,
-                "s1_colour":          _seg_status(s1),
-                "s2_colour":          _seg_status(s2),
-                "s3_colour":          _seg_status(s3),
+                "last_lap_time_in_s": parse_lap_time_to_seconds(last_lap_val),
+                "s1_time_in_s":       parse_lap_time_to_seconds(s1_val),
+                "s2_time_in_s":       parse_lap_time_to_seconds(s2_val),
+                "s3_time_in_s":       parse_lap_time_to_seconds(s3_val),
+                "s1_colour":          s1_state,
+                "s2_colour":          s2_state,
+                "s3_colour":          s3_state,
+                # Mini-sectors: 8-10 colours per sector (24-30 per lap)
+                "s1_segments":        _segment_colours(s1),
+                "s2_segments":        _segment_colours(s2),
+                "s3_segments":        _segment_colours(s3),
+                # Session best lap -- required for the qualifying tower
+                "best_lap":           best_lap_val,
+                "best_lap_time_in_s": parse_lap_time_to_seconds(best_lap_val),
+                "best_lap_number":    best_lap_obj.get("Lap"),
+                # Personal best sector times
+                "best_s1_time_in_s":  parse_lap_time_to_seconds(_val(best_sectors.get(0))),
+                "best_s2_time_in_s":  parse_lap_time_to_seconds(_val(best_sectors.get(1))),
+                "best_s3_time_in_s":  parse_lap_time_to_seconds(_val(best_sectors.get(2))),
+                # Speed traps (km/h): intermediate 1/2, finish line, trap
+                "speed_i1":           _speed(speeds, "I1"),
+                "speed_i2":           _speed(speeds, "I2"),
+                "speed_fl":           _speed(speeds, "FL"),
+                "speed_trap":         _speed(speeds, "ST"),
+                "pit_count":          pit_count,
                 "pitting":            bool(d.get("InPit", False)),
                 "last_lap_deleted":   bool(d.get("DeletedLap", False)),
-                "personal_fastest":   is_personal_fastest,
-                "overall_fastest":    is_overall_fastest,
+                "personal_fastest":   bool(last_lap_dict.get("PersonalFastest", False)),
+                "overall_fastest":    bool(last_lap_dict.get("OverallFastest", False)),
             })
         except Exception:
             logger.exception("clean_timing failed for driver %s", num_str)
+
+    # Mark the session-leading best lap purple. F1 flags OverallFastest on
+    # LastLapTime but not on BestLapTime, so derive it across the field here --
+    # cheap, and it keeps the qualifying tower correct after a lap is superseded.
+    candidates = [d["best_lap_time_in_s"] for d in drivers if d["best_lap_time_in_s"] is not None]
+    fastest = min(candidates, default=None)
+    for d in drivers:
+        d["best_lap_overall_fastest"] = (
+            fastest is not None and d["best_lap_time_in_s"] == fastest
+        )
+
     return {"drivers": drivers}
 
 
@@ -333,10 +431,15 @@ def clean_session(raw: dict) -> dict:
         phase = "PRE"
 
     return {
+        # Always None: neither SessionInfo nor SessionData carries a lap number.
+        # The lap count comes from the LapCount topic ("lap_count" envelope) and
+        # is merged client-side. Reading CurrentLap here used to look like it
+        # worked while always yielding None, which is how the tower ended up
+        # rendering "LAP 0".
+        "lap":        None,
+        "total_laps": raw.get("TotalLaps"),
         "name":       name,
         "status":     status,
-        "lap":        raw.get("CurrentLap"),
-        "total_laps": raw.get("TotalLaps"),
         "clock":      clock,
         "phase":      phase,
     }
@@ -419,6 +522,44 @@ def deep_merge(target: dict, source: dict) -> None:
                 target[k] = copy.deepcopy(v)
         else:
             target[k] = v
+
+
+def _coerce_payload(data_raw):
+    """
+    Parse a feed payload that may arrive as a str instead of a dict.
+
+    Strict JSON first. Only if that fails do we treat the string as a
+    Python-repr-style dict and hand it to ast.literal_eval.
+
+    The previous implementation ran, unconditionally:
+        data_raw.replace("'", '"').replace("True", "true").replace("False", "false")
+    which corrupts any valid payload whose *content* contains an apostrophe or
+    the word "True" — e.g. a race control message reading
+    "CAR 16 (LEC) - DRIVER'S OWN RISK" becomes invalid JSON and is silently
+    dropped. literal_eval handles the repr case without touching string
+    contents.
+
+    Returns a dict/list, or None when the payload cannot be parsed.
+    """
+    if not isinstance(data_raw, str):
+        return data_raw
+
+    text = data_raw.strip()
+    if not text:
+        return None
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            parsed = ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            logger.debug("Unparseable feed payload (%d chars)", len(text))
+            return None
+
+    # A bare scalar ("42", "true", a quoted string) is never a valid feed
+    # payload. Returning one would reach _process_message and blow up on .get().
+    return parsed if isinstance(parsed, (dict, list)) else None
 
 
 # ── Main client class ─────────────────────────────────────────────────────────
@@ -545,29 +686,17 @@ class PitwallSignalRClient:
             try:
                 if isinstance(msg.result, dict):
                     for topic, data_raw in msg.result.items():
-                        if isinstance(data_raw, str):
-                            data_raw = (data_raw
-                                        .replace("'", '"')
-                                        .replace("True", "true")
-                                        .replace("False", "false"))
-                            try:
-                                data_raw = json.loads(data_raw)
-                            except json.JSONDecodeError:
-                                continue
+                        data_raw = _coerce_payload(data_raw)
+                        if data_raw is None:
+                            continue
                         self._process_message(topic, data_raw)
                 elif isinstance(msg.result, list):
                     for item in msg.result:
                         if isinstance(item, list) and len(item) >= 2:
                             topic, data_raw = item[0], item[1]
-                            if isinstance(data_raw, str):
-                                data_raw = (data_raw
-                                            .replace("'", '"')
-                                            .replace("True", "true")
-                                            .replace("False", "false"))
-                                try:
-                                    data_raw = json.loads(data_raw)
-                                except json.JSONDecodeError:
-                                    continue
+                            data_raw = _coerce_payload(data_raw)
+                            if data_raw is None:
+                                continue
                             self._process_message(topic, data_raw)
             except Exception:
                 logger.exception("Failed processing CompletionMessage")
@@ -579,17 +708,10 @@ class PitwallSignalRClient:
         topic = msg[0]
         data_raw = msg[1]
 
-        if isinstance(data_raw, str):
-            # fix F1's non-compliant JSON booleans
-            data_raw = (data_raw
-                        .replace("'", '"')
-                        .replace("True", "true")
-                        .replace("False", "false"))
-            try:
-                data_raw = json.loads(data_raw)
-            except json.JSONDecodeError:
-                logger.debug("JSON decode error for topic %s", topic)
-                return
+        data_raw = _coerce_payload(data_raw)
+        if data_raw is None:
+            logger.debug("Could not parse payload for topic %s", topic)
+            return
 
         self._process_message(topic, data_raw)
 

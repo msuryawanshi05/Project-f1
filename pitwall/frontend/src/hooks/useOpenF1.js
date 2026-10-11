@@ -1,12 +1,20 @@
 /**
  * useOpenF1.js — PITWALL
  *
- * NOTE: OpenF1 now requires a paid subscription (returns 401 for all requests as of mid-2026).
- * Live timing data comes from F1 SignalR feed (free, no auth) via our backend.
- * Historical/static data comes from Jolpica/Ergast (free, no auth).
+ * OpenF1's historical endpoints are FREE and need no API key. Verified
+ * 2026-10-11 against live 2026 sessions: /drivers (incl. headshot_url), /laps
+ * (incl. 8-10 mini-sector statuses + i1/i2/st speeds), /stints, /pit (incl.
+ * lane_duration), /location (GPS x/y/z at ~3.3 Hz), /intervals, /position,
+ * /session_result and /team_radio all return 200.
  *
- * These hooks are kept for potential future use if OpenF1 free tier returns.
- * All calls route through /api/openf1 backend proxy (avoids CORS issues).
+ * A previous revision asserted "OpenF1 requires a paid subscription (401)" and
+ * stubbed these hooks out. That was incorrect and disabled the richest data
+ * source in the project. Real-time streaming still comes from F1 SignalR; use
+ * OpenF1 for post-session, replay and reference data.
+ *
+ * All calls route through the /api/openf1 backend proxy (avoids browser CORS).
+ * Pass a REAL OpenF1 session key (store.currentSessionKey) — never a round
+ * number; OpenF1 answers unknown keys with 404.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -25,12 +33,24 @@ async function openf1Get(path, params = {}) {
 }
 
 // ── Check if OpenF1 is reachable ─────────────────────────────────────────────
-// OpenF1 now requires a paid subscription (returns 401 for all requests).
-// Live data comes from F1 SignalR. Historical data comes from Jolpica/Ergast.
+// Probes the backend once per mount. Previously hardcoded `false`, which made
+// the Live page permanently display OpenF1 as unavailable.
 export function useOpenF1Status() {
-  // OpenF1 is not available without a paid subscription — return false immediately
-  // to avoid 401 errors hitting the network on every Live page mount.
-  return { reachable: false, checked: true }
+  const [state, setState] = useState({ reachable: false, checked: false })
+
+  useEffect(() => {
+    let cancelled = false
+    const base = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+    fetch(`${base}/api/openf1/status`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!cancelled) setState({ reachable: Boolean(j?.reachable), checked: true })
+      })
+      .catch(() => { if (!cancelled) setState({ reachable: false, checked: true }) })
+    return () => { cancelled = true }
+  }, [])
+
+  return state
 }
 
 // ── Historical stints (post-session strategy analysis) ────────────────────────
@@ -124,10 +144,26 @@ export function useOpenF1Laps(sessionKey, driverNumber) {
 }
 
 // ── Session lookup (find OpenF1 session_key for a given round/session) ────────
-export async function lookupSessionKey(year, roundNumber, sessionName) {
+/**
+ * Find an OpenF1 session_key for a given year + circuit + session name.
+ *
+ * Keyed on circuitShortName, not round: OpenF1 has no round field, and the old
+ * implementation matched `s.meeting_number === roundNumber || s.circuit_short_name`
+ * — the right-hand side is a non-empty string, so it was always truthy and the
+ * function returned the FIRST session of the year regardless of input.
+ *
+ * Prefer store.currentSessionKey (resolved server-side) where available.
+ */
+export async function lookupSessionKey(year, circuitShortName, sessionName) {
+  if (!year || !circuitShortName || !sessionName) return null
   try {
     const data = await openf1Get('v1/sessions', { year, session_name: sessionName })
-    const match = data.find((s) => s.meeting_number === roundNumber || s.circuit_short_name)
+    if (!Array.isArray(data)) return null
+    const want = String(circuitShortName).toLowerCase()
+    const match = data.find((s) => {
+      const have = String(s.circuit_short_name ?? '').toLowerCase()
+      return have && (have === want || have.includes(want) || want.includes(have))
+    })
     return match?.session_key ?? null
   } catch {
     return null
