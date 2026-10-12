@@ -27,8 +27,12 @@ account system and stores nothing about you.
 
 ## Live demo
 
-Not deployed yet. See [Deployment](#deployment) — in particular, the hosted build cannot stream
-live timing, for a reason worth reading before you try.
+Not deployed yet. [Deployment](#deployment) has step-by-step instructions for Vercel and Render
+on their free tiers.
+
+Worth knowing before you deploy: a hosted instance **cannot stream live timing**, because F1
+blocks cloud hosts. Everything else works. The details, and why the app reports it rather than
+failing silently, are under [Limitations](#limitations).
 
 ---
 
@@ -163,19 +167,65 @@ backend does not scale horizontally without redesign.
 
 ## Deployment
 
-`render.yaml` and `frontend/vercel.json` are committed and ready. Before deploying, read the
-cloud-host limitation above: the hosted dashboard will serve results, standings, drivers, teams
-and session history correctly, but will not stream live timing.
+`render.yaml` and `frontend/vercel.json` are committed, so both platforms can read their own
+configuration. Nothing here needs a paid tier.
 
-Required configuration:
+**Read this first.** F1's live timing refuses connections from cloud hosts (see
+[Limitations](#limitations)), so a deployed instance will serve results, standings, drivers,
+teams, the season calendar and session history correctly, but will **not** stream live timing.
+The app detects this and says so in its header rather than appearing broken. If you want live
+timing, run it locally during a session.
 
-- **Render** — set `CORS_ORIGINS` to the exact Vercel origins, comma separated, scheme included.
-- **Vercel** — set `VITE_API_URL` to `https://<render-service>.onrender.com` and `VITE_WS_URL` to
-  the same host with `wss://` and a `/ws` path.
-- Render's free tier sleeps after inactivity; the first load takes up to a minute to wake it. The
-  frontend backs off and shows a "waking" state rather than reporting itself offline.
+### 1. Backend on Render
 
----
+1. Render dashboard → **New** → **Blueprint** → select this repository. It picks up
+   `render.yaml`, which sets the Python runtime, `rootDir`, build and start commands, and the
+   `/health` check.
+2. When prompted for `CORS_ORIGINS`, leave it blank for now — you need the Vercel URL first.
+3. Deploy, and note the service URL, e.g. `https://pitwall-backend.onrender.com`.
+
+The start command pins `--workers 1` deliberately: the SignalR client and its in-process
+broadcast queue are per-process, so a second worker would open a second upstream connection and
+serve a different view of the session.
+
+### 2. Frontend on Vercel
+
+1. Vercel → **Add New** → **Project** → import this repository.
+2. Set **Root Directory** to `pitwall/frontend`. Vercel reads `vercel.json` for the Vite build
+   and the SPA rewrite (without that rewrite, every route except `/` 404s on refresh).
+3. Add two environment variables, using the Render URL from step 1:
+
+   | Name | Value |
+   |---|---|
+   | `VITE_API_URL` | `https://<your-service>.onrender.com` |
+   | `VITE_WS_URL` | `wss://<your-service>.onrender.com/ws` |
+
+   `wss://`, not `ws://` — a browser on HTTPS refuses an insecure WebSocket, and the failure is
+   silent apart from a console error.
+
+   These are build-time variables, so changing them needs a redeploy, not just a restart.
+4. Deploy and note the URL.
+
+### 3. Close the loop
+
+Set `CORS_ORIGINS` on the Render service to the exact Vercel origins, comma separated:
+
+```
+https://your-app.vercel.app,https://your-app-git-main-you.vercel.app
+```
+
+Scheme included, no trailing slash, and include the preview domain if you want previews to work.
+A mismatch shows up as every API call failing with a CORS error while the page itself loads fine.
+
+### 4. Verify
+
+- `https://<service>.onrender.com/health` → `{"status":"ok", ...}`
+- `https://<service>.onrender.com/api/live-status` → expect
+  `"availability": "unavailable_here"` from a cloud host; that is the correct result, not a fault.
+- Open the Vercel URL. The first load after inactivity takes up to a minute while Render wakes
+  the container — the header shows `CONNECTING…` then `WAKING…` rather than reporting offline.
+- Check `/drivers`, `/teams`, `/standings`, `/results` and `/season` all load and survive a
+  refresh (that exercises the SPA rewrite).
 
 ## Licence
 
