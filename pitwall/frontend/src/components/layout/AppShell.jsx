@@ -6,6 +6,7 @@ import { getTrackStatus, formatCountdown } from '../../utils/driverUtils'
 import NotificationStack from '../ui/NotificationStack'
 import useNotificationTriggers from '../../hooks/useNotificationTriggers'
 import useRaceWeekendState from '../../hooks/useRaceWeekendState'
+import useLiveStatus from '../../hooks/useLiveStatus'
 import DataMonitor from '../dev/DataMonitor'
 import BroadcastBanner from '../ui/BroadcastBanner'
 
@@ -86,7 +87,7 @@ function Countdown({ targetDate }) {
   )
 }
 
-export default function AppShell({ children, wsConnected }) {
+export default function AppShell({ children, wsConnected, connectionState = 'connecting', wsAttempts = 0 }) {
   const session     = useF1Store((s) => s.session)
   const trackStatus = useF1Store((s) => s.trackStatus)
   const calendar    = useF1Store((s) => s.calendar)
@@ -98,6 +99,7 @@ export default function AppShell({ children, wsConnected }) {
   // last value after the flag. Use the resolved lifecycle so a finished session
   // is not advertised as live.
   const { pathname } = useLocation()
+  const liveStatus = useLiveStatus()
   const weekendState = useRaceWeekendState()
   const isLive       = weekendState.isLive === true
   const isProvisional = weekendState.provisional === true
@@ -188,16 +190,43 @@ export default function AppShell({ children, wsConnected }) {
 
         {/* Right — WS connection status + shortcuts hint */}
         <div className="flex items-center gap-3 flex-shrink-0">
-          <div
-            role="status"
-            aria-label={`WebSocket: ${wsConnected ? 'connected' : 'disconnected'}`}
-            className="flex items-center gap-1.5 bg-pitwall-surface border border-pitwall-border px-2 py-0.5 rounded-sm"
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-status-green' : 'bg-pitwall-ghost'}`} aria-hidden="true" />
-            <span className="font-mono text-[10px] uppercase tracking-wider text-pitwall-dim">
-              {wsConnected ? 'LIVE' : 'OFFLINE'}
-            </span>
-          </div>
+          {/* Connection pill.
+              Three states, not two. A free-tier backend sleeps and takes most
+              of a minute to wake, so "connecting" is where the app genuinely
+              lives on a cold first load — showing OFFLINE there reads as
+              broken. And once connected, LIVE would still be misleading if the
+              feed itself is unavailable on this host, so the label follows the
+              feed, not just the socket. */}
+          {(() => {
+            const feedBlocked = liveStatus.availability === 'unavailable_here'
+            const waking = !wsConnected && wsAttempts >= 2
+            const label = wsConnected
+              ? (feedBlocked ? 'NO FEED' : 'CONNECTED')
+              : (waking ? 'WAKING…' : 'CONNECTING…')
+            const dot = wsConnected
+              ? (feedBlocked ? 'bg-status-yellow' : 'bg-status-green')
+              : 'bg-pitwall-ghost animate-pulse'
+            const title = wsConnected
+              ? (feedBlocked
+                  ? (liveStatus.detail ?? 'Live timing is not available on this deployment.')
+                  : 'Connected to the PITWALL backend.')
+              : (waking
+                  ? 'The backend is asleep (free tier) and is being woken. This takes up to a minute on first load.'
+                  : 'Connecting to the PITWALL backend.')
+            return (
+              <div
+                role="status"
+                aria-label={`Connection: ${label}`}
+                title={title}
+                className="flex items-center gap-1.5 bg-pitwall-surface border border-pitwall-border px-2 py-0.5 rounded-sm"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${dot}`} aria-hidden="true" />
+                <span className="font-mono text-[10px] uppercase tracking-wider text-pitwall-dim">
+                  {label}
+                </span>
+              </div>
+            )
+          })()}
 
           {/* ? shortcut hint button */}
           <button
@@ -249,11 +278,29 @@ export default function AppShell({ children, wsConnected }) {
         ))}
       </nav>
 
+      {/* Live timing unavailable on this host — stated once, plainly.
+          Without it a hosted instance looks broken: the socket is connected and
+          nothing ever arrives. Everything else on the site is unaffected. */}
+      {liveStatus.availability === 'unavailable_here' && (
+        <div
+          role="status"
+          className="fixed top-[92px] left-0 right-0 z-30 flex items-center justify-center gap-2 px-4 py-1.5 border-b border-status-yellow/40 bg-status-yellow/10"
+        >
+          <span className="font-display text-[10px] font-bold tracking-widest uppercase text-status-yellow">
+            Live timing unavailable here
+          </span>
+          <span className="font-mono text-[10px] text-pitwall-dim text-center">
+            F1's timing feed refuses connections from this server's network. Results, standings,
+            drivers, teams and session history all work normally.
+          </span>
+        </div>
+      )}
+
       {/* ── Main content ────────────────────────────────────────── */}
       <main
         role="main"
         id="main-content"
-        className="flex-1 mt-[104px] mb-7 overflow-auto"
+        className={`flex-1 ${liveStatus.availability === 'unavailable_here' ? 'mt-[134px]' : 'mt-[104px]'} mb-7 overflow-auto`}
         style={{ background: 'var(--pw-bg)' }}
         tabIndex={-1}
       >

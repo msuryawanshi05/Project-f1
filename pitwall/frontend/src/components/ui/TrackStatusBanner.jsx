@@ -1,13 +1,17 @@
 import { getTrackStatus } from '../../utils/driverUtils'
+import { bannerKeyForStatus } from '../../utils/trackStatus'
 import useF1Store from '../../store/useF1Store'
 
+// Keyed by what is actually happening on track, not by how severe it is.
 const BANNER_CONFIG = {
-  green:      null,  // no banner when clear
-  yellow:     { cls: 'status-banner-yellow', icon: '🟡', label: 'SAFETY CAR' },
-  vsc:        { cls: 'status-banner-yellow', icon: '🟡', label: 'VIRTUAL SAFETY CAR' },
-  vsc_ending: { cls: 'status-banner-yellow', icon: '🟡', label: 'VSC ENDING — PREPARE TO RACE' },
-  red:        { cls: 'status-banner-red',    icon: '🔴', label: 'RED FLAG — RACE SUSPENDED' },
+  green:       null,  // no banner when clear
+  yellow_flag: { cls: 'status-banner-yellow', icon: '🟡', label: 'YELLOW FLAG' },
+  safety_car:  { cls: 'status-banner-yellow', icon: '🟡', label: 'SAFETY CAR DEPLOYED' },
+  vsc:         { cls: 'status-banner-yellow', icon: '🟡', label: 'VIRTUAL SAFETY CAR' },
+  vsc_ending:  { cls: 'status-banner-yellow', icon: '🟡', label: 'VSC ENDING — PREPARE TO RACE' },
+  red:         { cls: 'status-banner-red',    icon: '🔴', label: 'RED FLAG — RACE SUSPENDED' },
 }
+
 
 /**
  * TrackStatusBanner — full-width coloured banner when track is not green.
@@ -44,17 +48,17 @@ export default function TrackStatusBanner({ statusCode }) {
   // If track is green/clear and not suspended pre-race, show nothing
   if (ts.severity === 'green' && !isPreRaceSuspended) return null
 
-  // Special keys for different safety car / suspension states
-  let configKey = ts.severity
-  if (statusCode === '5' || isPreRaceSuspended) {
-    configKey = 'red'
-  } else if (statusCode === '6') {
-    configKey = 'vsc'
-  } else if (statusCode === '7') {
-    configKey = 'vsc_ending'
-  }
+  // Pick the banner from the STATUS CODE, never from the severity.
+  //
+  // getTrackStatus maps both '4' (safety car) and '5' (red flag) to
+  // severity 'red' — correct for badge colouring, since both are serious — but
+  // this component used severity as its config key, so a safety car rendered
+  // the red-flag banner: "RED FLAG — RACE SUSPENDED" while the race was
+  // running behind the SC. Severity answers "how alarming"; it does not answer
+  // "what is happening", and only the code does.
+  const configKey = bannerKeyForStatus(statusCode, { preRaceSuspended: isPreRaceSuspended })
 
-  const config = BANNER_CONFIG[configKey] ?? BANNER_CONFIG.yellow
+  const config = BANNER_CONFIG[configKey] ?? BANNER_CONFIG.yellow_flag
 
   let bannerLabel = config.label ?? ts.label
   if (isPreRaceSuspended && latestMsg?.message) {

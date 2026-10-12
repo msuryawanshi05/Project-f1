@@ -3,7 +3,14 @@ import useF1Store from '../store/useF1Store'
 
 const WS_URL              = import.meta.env.VITE_WS_URL  ?? 'ws://localhost:8000/ws'
 const API_BASE            = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
-const RECONNECT_DELAY_MS  = 3000
+// Reconnect backoff.
+//
+// A fixed 3s retry is wrong for a free-tier host: Render spins containers down
+// after inactivity and a cold start takes roughly 30-60 seconds, during which
+// every attempt fails. Hammering it does not help and the UI just reads as
+// broken. Backing off while REPORTING that we are still trying is the
+// difference between "waking the server" and "offline".
+const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 15000, 30000]
 
 // ── Never-delay message types (safety/meta) ──────────────────────────────────
 const NO_DELAY_TYPES = new Set(['session', 'track_status', 'ping', 'lap_count', 'driver_list'])
@@ -38,9 +45,14 @@ setInterval(() => {
 
 export function useWebSocket() {
   const [connected, setConnected] = useState(false)
+  // 'connecting' is a real state, not a transient: on a cold-started backend it
+  // is where the app lives for the better part of a minute.
+  const [connectionState, setConnectionState] = useState('connecting')
+  const [attempts, setAttempts] = useState(0)
   const wsRef             = useRef(null)
   const reconnectTimerRef = useRef(null)
   const connectedRef      = useRef(false)  // sync ref for visibility handler
+  const attemptsRef       = useRef(0)
 
   const {
     setSession,
@@ -264,11 +276,15 @@ function hasRecentStartProcedure(messages) {
   const connect = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return
 
+    setConnectionState((prev) => (prev === 'connected' ? prev : 'connecting'))
     const ws = new WebSocket(WS_URL)
     wsRef.current = ws
 
     ws.onopen = () => {
       setConnected(true)
+      setConnectionState('connected')
+      attemptsRef.current = 0
+      setAttempts(0)
       connectedRef.current = true
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
@@ -306,7 +322,12 @@ function hasRecentStartProcedure(messages) {
     ws.onclose = () => {
       setConnected(false)
       connectedRef.current = false
-      reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS)
+      const n = attemptsRef.current
+      attemptsRef.current = n + 1
+      setAttempts(n + 1)
+      setConnectionState('connecting')
+      const delay = RECONNECT_BACKOFF_MS[Math.min(n, RECONNECT_BACKOFF_MS.length - 1)]
+      reconnectTimerRef.current = setTimeout(connect, delay)
     }
 
     ws.onerror = (err) => {
@@ -361,7 +382,7 @@ function hasRecentStartProcedure(messages) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  return { connected }
+  return { connected, connectionState, attempts }
 }
 
 // ── Helper: "1:23.456" → seconds ────────────────────────────────────────────

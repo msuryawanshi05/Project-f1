@@ -122,7 +122,13 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "clients": len(connected_clients)}
+    """Liveness probe. Returns ok whenever the API is up, independent of whether
+    the F1 live feed is reachable — see /api/live-status for that."""
+    return {
+        "status": "ok",
+        "clients": len(connected_clients),
+        "live_timing": get_client().status()["state"],
+    }
 
 
 OPENF1_BASE = "https://api.openf1.org/v1"
@@ -786,6 +792,52 @@ async def constructor_career(constructor_id: str):
     ttl = 120.0 if missing else (CAREER_TTL_CURRENT if current else CAREER_TTL_HISTORIC)
     await api_cache_set(cache_key, payload, ttl)
     return payload
+
+
+@app.get("/api/live-status")
+async def live_status():
+    """
+    Whether live timing is actually available on THIS deployment.
+
+    Exists because the browser's WebSocket connecting successfully says nothing
+    about whether F1 data is flowing: that socket is to this backend, not to F1.
+    On a cloud host the socket connects and then no timing ever arrives, which
+    is indistinguishable from "no session right now" unless we say which it is.
+
+    F1's live timing answers 403 to most datacenter IP ranges, so a hosted
+    instance generally cannot stream it. Everything else — results, standings,
+    drivers, teams, season, pit timings, speed traps — comes from Jolpica and
+    OpenF1, both reachable from cloud hosts.
+    """
+    client = get_client()
+    status = client.status()
+
+    if status["blocked"]:
+        availability = "unavailable_here"
+        detail = (
+            "F1's live timing feed does not accept connections from this server's "
+            "network. Historical and reference data are unaffected."
+        )
+    elif status["state"] == "live":
+        availability = "live"
+        detail = "Connected to the F1 live timing feed."
+    elif status["state"] in ("connecting", "idle"):
+        availability = "connecting"
+        detail = "Connecting to the F1 live timing feed."
+    else:
+        availability = "error"
+        detail = status["last_error"] or "The live timing feed is not currently reachable."
+
+    return {
+        "availability": availability,
+        "detail": detail,
+        "signalr": status,
+        "clients": len(connected_clients),
+        # These are what the rest of the dashboard runs on, and they work
+        # everywhere — worth reporting separately so a degraded live feed is
+        # not read as the whole app being down.
+        "reference_data": {"jolpica": True, "openf1": True},
+    }
 
 
 @app.websocket("/ws")

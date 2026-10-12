@@ -45,3 +45,16 @@ scripts/
 *.db
 *.sqlite
 *.sqlite3
+# FastF1 cache — regenerable, and ~91 MB of the tracked tree.
+# FastF1 rebuilds it on demand; nothing here belongs in version control.
+pitwall/backend/ff1_cache/
+*.ff1pkl
+
+# Local SQLite caches (session state + the API cache), rebuilt on startup
+pitwall/backend/pitwall_cache.db
+*.sqlite
+*.sqlite3
+
+# Playwright artefacts
+test-results/
+playwright-report/

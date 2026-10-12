@@ -99,7 +99,7 @@ function BootLoader({ onComplete }) {
 }
 
 // ── Inner app — uses router context (keyboard shortcuts need useNavigate) ──────
-function AppInner({ connected }) {
+function AppInner({ connected, connectionState, attempts }) {
   const darkMode    = useF1Store((s) => s.settings.darkMode)
   const teamAccent  = useF1Store((s) => s.settings.teamAccent)
   const trackStatus = useF1Store((s) => s.trackStatus)
@@ -195,7 +195,7 @@ function AppInner({ connected }) {
       </div>
 
       {/* ── Main app shell and routing ───────────────────────────── */}
-      <AppShell wsConnected={connected}>
+      <AppShell wsConnected={connected} connectionState={connectionState} wsAttempts={attempts}>
         <Suspense fallback={<div className="flex-1" />}>
           <Routes>
             <Route path="/"          element={<Home />}      />
@@ -228,7 +228,7 @@ function AppInner({ connected }) {
 }
 
 function App() {
-  const { connected } = useWebSocket()
+  const { connected, connectionState, attempts } = useWebSocket()
   useJolpica()
   useDynamicTitle()
 
@@ -248,7 +248,7 @@ function App() {
       <AnimatePresence>
         {booting && <BootLoader onComplete={() => { sessionStorage.setItem('pitwall_booted', '1'); setBooting(false) }} />}
       </AnimatePresence>
-      <AppInner connected={connected} />
+      <AppInner connected={connected} connectionState={connectionState} attempts={attempts} />
     </ErrorBoundary>
   )
 }

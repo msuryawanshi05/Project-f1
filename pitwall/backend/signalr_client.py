@@ -640,7 +640,35 @@ class PitwallSignalRClient:
         self._queue: Optional[asyncio.Queue] = None
         self._running = False
         self._connected = False
+        # Why this is tracked and surfaced:
+        #
+        # livetiming.formula1.com returns 403 to most cloud/VPS networks — the
+        # host allowlist is effectively residential-only. The same code that
+        # works on a laptop therefore cannot reach the feed from Render, Fly,
+        # GitHub Actions or Colab. Without reporting it, a deployed instance
+        # looks simply broken: the browser WebSocket connects fine (that is to
+        # OUR backend) while no timing ever arrives.
+        #
+        # Everything else in the app — results, standings, drivers, teams,
+        # season, pit timings, speed traps — comes from Jolpica and OpenF1,
+        # both of which ARE reachable from cloud hosts, so the right behaviour
+        # is to degrade and say so, not to pretend.
+        self._status = "idle"          # idle | connecting | live | blocked | error
+        self._last_error: Optional[str] = None
+        self._blocked = False
+        self._last_message_at: Optional[float] = None
         self._clear_raw_states()
+
+    def status(self) -> dict:
+        """Snapshot for /api/live-status."""
+        return {
+            "state": self._status,
+            "connected": self._connected,
+            "blocked": self._blocked,
+            "last_error": self._last_error,
+            "last_message_at": self._last_message_at,
+            "running": self._running,
+        }
 
     def _clear_raw_states(self) -> None:
         self._raw_states = {
@@ -679,6 +707,7 @@ class PitwallSignalRClient:
 
     def _put_message(self, envelope: dict) -> None:
         """Thread-safe: schedule a put into the asyncio queue."""
+        self._last_message_at = time.time()
         if self._loop and self._queue:
             self._loop.call_soon_threadsafe(self._queue.put_nowait, envelope)
 
@@ -777,30 +806,69 @@ class PitwallSignalRClient:
 
     def _on_connect(self) -> None:
         self._connected = True
+        self._status = "live"
+        self._blocked = False
+        self._last_error = None
         logger.info("SignalR connected to F1 live timing")
 
     def _on_close(self) -> None:
         self._connected = False
+        if self._status == "live":
+            self._status = "connecting"
         logger.warning("SignalR connection closed")
 
     def _run(self) -> None:
         """Blocking: negotiate, connect, subscribe, supervise. Retries on failure."""
-        RETRY_DELAY = 10  # seconds between attempts
+        RETRY_DELAY = 10          # normal retry cadence
+        BLOCKED_RETRY_DELAY = 600 # a host allowlist will not change in 10 seconds
 
         while self._running:
             logger.info("SignalR connection starting...")
             self._attempt_connect()
             if not self._running:
                 break
+            delay = BLOCKED_RETRY_DELAY if self._blocked else RETRY_DELAY
             logger.warning(
-                "SignalR disconnected or failed to connect — retrying in %ds",
-                RETRY_DELAY,
+                "SignalR disconnected or failed to connect — retrying in %ds%s",
+                delay,
+                " (host is blocked by F1)" if self._blocked else "",
             )
-            time.sleep(RETRY_DELAY)
+            time.sleep(delay)
 
     def _attempt_connect(self) -> bool:
         """Single connection attempt. Returns True if session ran successfully."""
+        self._status = "connecting"
         try:
+            # Reachability probe FIRST.
+            #
+            # F1 answers 403 to most datacenter IP ranges. Detecting that here
+            # gives an accurate reason ("this host is blocked") instead of a
+            # 15-second connection timeout that reads as a network fault, and
+            # it is what /api/live-status reports to the UI.
+            try:
+                probe = requests.get(
+                    "https://livetiming.formula1.com/static/StreamingStatus.json",
+                    timeout=10,
+                )
+                if probe.status_code == 403:
+                    self._blocked = True
+                    self._status = "blocked"
+                    self._last_error = (
+                        "livetiming.formula1.com returned 403 for this host. F1's live "
+                        "timing feed is not reachable from most cloud/VPS networks; it "
+                        "generally only answers residential connections."
+                    )
+                    logger.warning(
+                        "F1 live timing is blocking this host (403). Live timing will be "
+                        "unavailable; all Jolpica/OpenF1-backed features still work."
+                    )
+                    return False
+                self._blocked = False
+            except Exception as exc:  # noqa: BLE001
+                # A failed probe is not conclusive — carry on and let the real
+                # connection attempt decide.
+                logger.debug("Live timing probe inconclusive: %s", exc)
+
             # Pre-negotiate to get AWSALBCORS cookie (required by F1's AWS WAF)
             logger.info("Pre-negotiating AWSALBCORS cookie...")
             resp = requests.options(_NEGOTIATE_URL, timeout=10)
@@ -832,6 +900,11 @@ class PitwallSignalRClient:
                 time.sleep(0.1)
 
             if not self._connected:
+                self._status = "error"
+                self._last_error = (
+                    "Timed out waiting for the SignalR handshake. This usually means "
+                    "no session is streaming, or the host is being filtered."
+                )
                 logger.error("SignalR connection timeout — check network or F1 season status")
                 return False
 
@@ -845,7 +918,9 @@ class PitwallSignalRClient:
 
             return True
 
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            self._status = "error"
+            self._last_error = str(exc)[:300]
             logger.exception("SignalR connection attempt error")
             return False
         finally:

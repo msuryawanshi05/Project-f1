@@ -1,0 +1,30 @@
+# Render blueprint for the PITWALL backend.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> point at this repo.
+#
+# IMPORTANT, and the reason this file documents it rather than hiding it:
+# F1's live timing feed (livetiming.formula1.com) answers 403 to most
+# datacenter IP ranges, so the SignalR stream will almost certainly NOT work
+# from Render. The app detects this and says so in the UI rather than appearing
+# broken — see /api/live-status. Everything served from Jolpica and OpenF1
+# (results, standings, drivers, teams, season, pit timings, speed traps,
+# telemetry history) works normally from a cloud host.
+services:
+  - type: web
+    name: pitwall-backend
+    runtime: python
+    plan: free
+    rootDir: pitwall/backend
+    buildCommand: pip install -r requirements.txt
+    # Single worker on purpose: the SignalR client and its in-process broadcast
+    # queue are per-process, so a second worker would open a second upstream
+    # connection and serve a different view of the session.
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      # Must list the exact Vercel origins, scheme included. A trailing slash
+      # or a missing preview domain shows up as every request being blocked.
+      - key: CORS_ORIGINS
+        sync: false

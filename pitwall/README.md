@@ -1,28 +1,18 @@
-# PITWALL
+# pitwall/
 
-A personal, browser-based F1 live timing dashboard — everything an F1 engineer sees on the pit wall, free and live.
+Application source. See the [repository README](../README.md) for what PITWALL is, the data
+sources, architecture and setup.
 
-## Running the Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-# → http://localhost:5173
+```
+pitwall/
+├── backend/     FastAPI — SignalR bridge, WebSocket broadcaster, cached Jolpica/OpenF1 endpoints
+├── frontend/    React 18 + Vite + Tailwind + Zustand
+└── scripts/     record-demo.mjs — regenerates the README demo GIF
 ```
 
-## Running the Backend
+Quick start, from this directory:
 
 ```bash
-cd backend
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
-
-pip install -r requirements.txt
-uvicorn main:app --reload
-# → http://localhost:8000
-# Health check: http://localhost:8000/health
+cd backend  && python -m venv .venv && . .venv/Scripts/activate && pip install -r requirements.txt && uvicorn main:app --port 8000
+cd frontend && npm install && npm run dev
 ```

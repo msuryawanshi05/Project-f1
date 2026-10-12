@@ -1,127 +1,186 @@
-<div align="center">
+# PITWALL
 
-# 🏎️ PITWALL — Real-Time F1 Timing & Telemetry Dashboard
+A Formula 1 timing dashboard for a second screen. It streams live session timing from F1's own
+feed when one is running, and otherwise serves results, standings, driver and constructor
+history from free public APIs.
 
-### High-performance Formula 1 session timing, interactive telemetry, and live track maps
+![PITWALL walkthrough](./assets/pitwall-demo.gif)
 
-<!-- BADGE ROW 1 — Context & Status -->
-
-[![Domain](https://img.shields.io/badge/Domain-Automotive%20%26%20Sports%20Analytics-orange?style=for-the-badge)](#)
-[![Built For](https://img.shields.io/badge/Built%20For-Personal%20Project-blue?style=for-the-badge)](#)
-[![Result](https://img.shields.io/badge/🏆%20Result-Real--Time%20Telemetry%20Engine-silver?style=for-the-badge)](#)
-[![Status](https://img.shields.io/badge/Status-Active%20Development-green?style=for-the-badge)](#)
-
-<!-- BADGE ROW 2 — Actual Tech Stack -->
-
-![React](https://img.shields.io/badge/React_18-61DAFB?style=flat&logo=react&logoColor=black)
-![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
-![Python](https://img.shields.io/badge/Python_3.11-3776AB?style=flat&logo=python&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat&logo=sqlite&logoColor=white)
-![Zustand](https://img.shields.io/badge/Zustand-443e38?style=flat&logo=react&logoColor=white)
-![TailwindCSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat&logo=tailwindcss&logoColor=white)
-
-> **Context line:** Personal Engineering Project &nbsp;|&nbsp; **Category:** Real-Time Data Visualization & Analytics &nbsp;|&nbsp; **Data Sources:** OpenF1 API & Jolpica/Ergast API
-
-🔴 **Demo:** Coming soon — will be replaced with 🔗 **[Live Demo](https://pitwall-frontend.vercel.app)** once hosted
-
-</div>
+<sub>Recorded with [`pitwall/scripts/record-demo.mjs`](pitwall/scripts/record-demo.mjs) against a
+fixed seeded race state, so it is reproducible out of season. The timing values in the GIF are
+synthetic; everything the deployed app shows is real.</sub>
 
 ---
 
-## 📸 Preview
+## What it does
 
-![Preview](./assets/preview-collage.png)
+**Live, during a session** — timing tower with gap and interval, sector times with F1's
+purple/green/yellow colouring, mini-sector detail, tyre compound and age, pit stop counts, speed
+traps, and a qualifying mode that switches to best-lap order with the correct knockout line.
+Track map, weather, race control messages, and a telemetry tab with speed/throttle/brake/gear.
 
-## 🧠 Overview
+**Any time** — race results, championship standings, driver and constructor career records with
+head-to-head comparison, the season calendar with circuit detail, and session history.
 
-PITWALL is an engineer-grade Formula 1 timing and telemetry dashboard designed to deliver live Grand Prix timing, speed/RPM telemetry comparisons, and interactive circuit map visualizations completely free of cost. It bridges real-time telemetry streaming with historical session analysis to give fans and engineers a professional pitwall experience.
+**What it is not** — a betting tool, a replacement for F1 TV, or an official product. It has no
+account system and stores nothing about you.
 
-## ✨ Key Features
+## Live demo
 
-- **Live Session Timing & Driver Gaps** — Sector time indicators (purple/green/yellow), interval gaps, tire compound tracking, and pit status in real time.
-- **Dynamic Track Canvas Rendering** — Interactive HTML5 canvas track layouts driven by open-source GeoJSON circuit data with active sector highlighting.
-- **Multi-Driver Telemetry Charts** — Synchronized speed, throttle, brake, gear, and RPM comparison curves powered by Recharts.
-- **Virtualized High-Frequency Lists** — Smooth table rendering for hundreds of driver lap iterations using `react-window` to eliminate DOM lag.
+Not deployed yet. See [Deployment](#deployment) — in particular, the hosted build cannot stream
+live timing, for a reason worth reading before you try.
 
-## 🏗️ Architecture
+---
+
+## Data sources
+
+Everything is free and unauthenticated. There are no API keys in this project.
+
+| Source | Serves | Auth | Notes |
+|---|---|---|---|
+| **F1 SignalR** `livetiming.formula1.com` | Live timing, sectors, tyres, race control, track status, weather, car telemetry | none | Only while a session is running. **Blocked from most cloud hosts** — see below. |
+| **Jolpica** (Ergast mirror) `api.jolpi.ca` | Calendar, results, qualifying, championship standings, driver and constructor careers back to 1950 | none | Rate limited to roughly 2.5 req/s sustained; the backend paces and caches accordingly. |
+| **OpenF1** `api.openf1.org` | Driver headshots, pit lane timings, stints, lap data, team radio, intervals, GPS positions | none | Historical endpoints are free. Needs a real five-digit `session_key`, not a round number. |
+| **Open-Meteo** `api.open-meteo.com` | Circuit weather forecast | none | Used on the season/circuit panels. |
+| **Wikipedia REST** | Circuit summaries | none | Proxied by the backend, which sets the required `User-Agent`. |
+| **Formula 1 media CDN** | Team logos, driver headshots | none | Images only, served directly to the browser. |
+
+Circuit geometry comes from [`bacinger/f1-circuits`](https://github.com/bacinger/f1-circuits)
+(OpenStreetMap-traced GeoJSON), vendored in `pitwall/frontend/public/trackmaps/`.
+
+---
+
+## Architecture
 
 ```
-[ OpenF1 / Jolpica APIs ] ──▶ [ FastAPI Backend + SignalR Sync ] ──▶ [ Async SQLite Cache ]
-                                              │
-                                     (WebSocket Feeds)
-                                              ▼
-[ Recharts & Canvas Map ] ◀── [ Zustand Global Store ] ◀── [ React 18 UI + Framer Motion ]
+                    ┌──────────────────────────────────────────┐
+  LIVE PATH         │  livetiming.formula1.com  (SignalR)      │
+  (session only)    └────────────────────┬─────────────────────┘
+                                         │  WebSocket, no auth
+                                         │  403 from most datacenters
+                    ┌────────────────────▼─────────────────────┐
+                    │  FastAPI backend                         │
+                    │                                          │
+                    │  signalr_client.py  parse + normalise    │
+                    │        │                                 │
+                    │        ▼                                 │
+                    │  asyncio.Queue ──► broadcaster           │
+                    │        │                                 │
+                    │        ├──► SQLite session cache (3 h)   │
+                    │        └──► every connected browser      │
+                    │                                          │
+                    │  /api/driver|constructor/{id}/career     │
+                    │        └─► Jolpica, paced + cached 24 h  │
+                    │  /api/openf1/*   transparent proxy       │
+                    │  /api/live-status  is the feed usable?   │
+                    └────────────────────┬─────────────────────┘
+                                         │  WebSocket + REST
+                    ┌────────────────────▼─────────────────────┐
+                    │  React 18 + Vite + Tailwind              │
+                    │                                          │
+                    │  Zustand store ◄── useWebSocket          │
+                    │        │                                 │
+                    │        ▼                                 │
+                    │  Live · Drivers · Standings · Results    │
+                    └──────────────────────────────────────────┘
+                                         ▲
+  REFERENCE PATH                         │  direct from the browser
+  (always available)  ┌──────────────────┴─────────────────────┐
+                      │  Jolpica · OpenF1 · Open-Meteo · F1 CDN│
+                      └────────────────────────────────────────┘
 ```
 
-A dual-ingestion architecture decouples external API latency from client rendering. The FastAPI backend aggregates asynchronous telemetry queues into a local SQLite cache while broadcasting live deltas via WebSockets directly into Zustand transient state.
+The two paths are independent on purpose: the live feed going away degrades the Live tab and
+nothing else.
 
-## 🔥 The Hard Part
+---
 
-**Problem:** Ingesting high-frequency telemetry feeds across 20+ drivers concurrently caused severe React component re-render cascades and browser frame drops during live sessions.  
-**Approach:** Attempted traditional React state propagation and polling intervals, which locked the UI thread during multi-lap chart updates.  
-**Solution:** Migrated global session state to Zustand with selective sub-tree subscriptions, decoupled canvas map updates from React DOM cycles, and implemented `react-window` virtualization for driver timing tables.
+## Running locally
 
-## 📁 Project Structure
-
-```
-Project F1/
-├── pitwall/
-│   ├── backend/
-│   │   ├── main.py          # FastAPI endpoints & WebSocket broadcaster
-│   │   ├── db.py            # Async SQLite cache layer
-│   │   ├── scheduler.py     # Session state & calendar sync background jobs
-│   │   └── signalr_client.py# OpenF1 live telemetry stream consumer
-│   └── frontend/
-│       ├── public/          # Circuit GeoJSON maps & assets
-│       └── src/
-│           ├── components/  # Timing tables, track canvas, telemetry charts
-│           ├── hooks/       # Custom telemetry & WebSocket hooks
-│           ├── pages/       # Live, Results, Standings, & Season views
-│           └── store/       # Zustand high-performance session store
-└── README.md
-```
-
-## 🚀 Run It Locally
+Requires Node 18+ and Python 3.11+.
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/msuryawanshi05/Project-f1.git
-cd Project-f1
+cd Project-f1/pitwall
 
-# 2. Run the Backend (Python FastAPI)
-cd pitwall/backend
-python -m venv venv
-# Windows: venv\Scripts\activate | Unix: source venv/bin/activate
+# backend  →  http://localhost:8000
+cd backend
+python -m venv .venv && . .venv/Scripts/activate      # Windows
+# python3 -m venv .venv && source .venv/bin/activate  # macOS / Linux
 pip install -r requirements.txt
-python -m uvicorn main:app --reload --port 8000
+uvicorn main:app --port 8000
 
-# 3. Run the Frontend (React + Vite)
+# frontend →  http://localhost:5173   (second terminal)
 cd ../frontend
 npm install
 npm run dev
 ```
 
-### Config / Environment Variables
+No configuration is needed for local use. `backend/.env` can override `HOST`, `PORT` and
+`CORS_ORIGINS`; the defaults already allow both `localhost` and `127.0.0.1` on the dev ports.
 
-The backend works out-of-the-box using free public APIs (OpenF1 & Ergast/Jolpica). An optional `.env` file can be placed in `pitwall/backend/` for server configuration:
+### Tests
 
-```env
-HOST=127.0.0.1
-PORT=8000
-CORS_ORIGINS=http://localhost:5173
+```bash
+cd pitwall/backend && python test_clean_timing.py && python test_payload_parsing.py && python test_live_status.py
+cd ../frontend && for t in sessionLifecycle qualifyingUtils teamColours trackStatus; do node src/utils/$t.test.mjs; done
 ```
 
-## 📈 What's Next
-
-- [ ] Alignment with 2026 FIA Technical Regulations & telemetry telemetry channels
-- [ ] Multi-driver side-by-side video sync overlay
-- [ ] Automated race strategy pit window probability calculator
+They cover the parts where being wrong is invisible: F1's mini-sector colour codes, the
+qualifying knockout maths, session lifecycle transitions, contrast ratios, and the track status
+banner.
 
 ---
 
-<div align="center">
+## Limitations
 
-Built by **msuryawanshi.05**
+**Live timing only exists during a session.** F1 publishes the feed from roughly five minutes
+before a session until shortly after it ends. Outside that window the Live tab shows a countdown
+to the next session, and the tower is empty — that is the feed being absent, not a fault.
 
-</div>
+**F1's live timing refuses connections from most cloud hosts.** `livetiming.formula1.com` returns
+403 to VPS, CI and serverless IP ranges; it generally only answers residential connections. A
+deployed instance therefore cannot stream live timing, and the app says so in the UI rather than
+appearing broken ([`/api/live-status`](pitwall/backend/main.py)). Running it on your own machine
+during a session works. Everything served by Jolpica and OpenF1 is unaffected.
+
+**Results lag the chequered flag.** Official classification appears on Jolpica minutes to hours
+after a race. In between, the app shows the retained timing state as a provisional classification
+for 30 minutes, then an explicit "awaiting official results" state.
+
+**Manual Override Mode is inferred, not official.** F1 has not published a dedicated MOM channel
+for 2026. The indicator derives from the hybrid deployment channel that previously carried DRS
+state, and is labelled as derived in the UI.
+
+**Some reference data is not verifiable and is left blank.** Lap records, Pirelli compound
+allocations and per-circuit sector splits are `null` in `circuits.json` where no free source
+publishes them. They render as "—" rather than a plausible guess.
+
+**Single backend process.** The SignalR client and its broadcast queue are per-process, so the
+backend does not scale horizontally without redesign.
+
+---
+
+## Deployment
+
+`render.yaml` and `frontend/vercel.json` are committed and ready. Before deploying, read the
+cloud-host limitation above: the hosted dashboard will serve results, standings, drivers, teams
+and session history correctly, but will not stream live timing.
+
+Required configuration:
+
+- **Render** — set `CORS_ORIGINS` to the exact Vercel origins, comma separated, scheme included.
+- **Vercel** — set `VITE_API_URL` to `https://<render-service>.onrender.com` and `VITE_WS_URL` to
+  the same host with `wss://` and a `/ws` path.
+- Render's free tier sleeps after inactivity; the first load takes up to a minute to wake it. The
+  frontend backs off and shows a "waking" state rather than reporting itself offline.
+
+---
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
+
+Unofficial and non-commercial. Not associated with or endorsed by Formula 1, the FIA, or any
+team. F1 marks belong to Formula One Licensing BV; logos and driver images are served from F1's
+media CDN and remain the property of their owners.
