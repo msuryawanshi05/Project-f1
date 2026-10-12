@@ -1,14 +1,11 @@
 import { useState } from 'react'
 import useF1Store from '../../store/useF1Store'
 import teamsData from '../../data/teams.json'
-import { getSafeTeamColour } from '../../utils/driverUtils'
+import { teamColour } from '../../utils/teamColours'
 
+// Shared colour table; `text` because this value colours a constructor name.
 function getTeamColourByName(teamName) {
-  if (!teamName) return '#888888'
-  const hex = Object.entries(teamsData.teamColours).find(([k]) =>
-    teamName.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(teamName.toLowerCase())
-  )?.[1] ?? '#888888'
-  return getSafeTeamColour(hex)
+  return teamColour(teamName, { role: 'text' })
 }
 
 export function Tooltip({ content, children, className = '' }) {

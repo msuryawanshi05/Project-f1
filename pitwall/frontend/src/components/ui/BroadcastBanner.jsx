@@ -1,20 +1,12 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import useF1Store from '../../store/useF1Store'
-import { getSafeTeamColour, resolveDriverCode } from '../../utils/driverUtils'
+import { resolveDriverCode } from '../../utils/driverUtils'
+import { teamColour } from '../../utils/teamColours'
 
-const TEAM_COLOURS = {
-  'Red Bull': '#3671C6', 'Ferrari': '#E8002D', 'Mercedes': '#27F4D2',
-  'McLaren': '#FF8000', 'Aston Martin': '#229971', 'Alpine': '#FF87BC',
-  'Williams': '#64C4FF', 'RB': '#6692FF', 'Haas': '#B6BABD', 'Sauber': '#52E252',
-  'Audi': '#A6A6A6', 'Cadillac': '#EEB211',
-}
-
+// Shared colour table — this banner had its own stale livery map too.
 function getTeamColourByName(name) {
-  const hex = Object.entries(TEAM_COLOURS).find(([k]) =>
-    name?.toLowerCase().includes(k.toLowerCase())
-  )?.[1] ?? '#555555'
-  return getSafeTeamColour(hex)
+  return teamColour(name, { role: 'text' })
 }
 
 export default function BroadcastBanner() {

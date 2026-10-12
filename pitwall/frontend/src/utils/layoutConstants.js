@@ -105,3 +105,57 @@ export function towerMinWidth(columns) {
 
 /** Row height by density setting. */
 export const TOWER_ROW_HEIGHT = { compact: 'h-8', comfortable: 'h-10' }
+
+/**
+ * Pit stop log columns.
+ *
+ * Same reasoning as the tower: the header and the rows were two hand-matched
+ * sets of fixed widths (w-10, w-12, w-20...) inside a flex row whose last cell
+ * was `flex-1`. That left a large dead gap between the compound column and the
+ * right edge on a wide screen, because `flex-1` absorbed all the slack in one
+ * place instead of distributing it.
+ */
+export const PIT_LOG_COLUMNS = [
+  { key: 'lap',      label: 'LAP',          grid: '56px',               align: 'center' },
+  { key: 'accent',   label: '',             grid: '3px',                align: 'center' },
+  { key: 'driver',   label: 'DRIVER',       grid: 'minmax(96px, 1fr)',  align: 'left'   },
+  { key: 'stop',     label: 'STOP',         grid: '56px',               align: 'center' },
+  { key: 'duration', label: 'PIT LANE',     grid: 'minmax(96px, 1fr)',  align: 'left'   },
+  { key: 'compound', label: 'TYRE CHANGE',  grid: 'minmax(150px, 2fr)', align: 'left'   },
+  { key: 'flag',     label: '',             grid: 'minmax(64px, 1fr)',  align: 'right'  },
+]
+
+export const PIT_LOG_TEMPLATE = PIT_LOG_COLUMNS.map((c) => c.grid).join(' ')
+
+/**
+ * Live page spacing scale.
+ *
+ * Gutters, panel padding and gaps were set per-component — px-4 here, px-6
+ * there, p-4 inside a panel whose sibling used p-3 — so the rhythm changed from
+ * panel to panel and shifted again when the sidebar was toggled. These are the
+ * only values the Live layout should use.
+ *
+ * Tailwind equivalents are given so the scale and the classes stay in step:
+ *   gutter 16px = px-4, panelPad 12px = p-3, gap 12px = gap-3
+ */
+export const LIVE_SPACING = {
+  gutter: 16,    // page edge -> content
+  panelPad: 12,  // panel border -> its content
+  gap: 12,       // between sibling panels
+  headerY: 8,    // vertical padding inside a panel header
+}
+
+/**
+ * Sidebar sizing for the Live page.
+ *
+ * `min` keeps the map and weather readable; `max` stops the sidebar starving
+ * the tower. The real upper bound is computed at runtime from the container
+ * width minus the tower's own minimum, because the tower minimum differs
+ * between race and qualifying column sets.
+ */
+export const SIDEBAR = {
+  min: 300,
+  max: 760,
+  default: 460,
+  handle: 6,     // drag handle hit area (px)
+}

@@ -6,6 +6,8 @@ import useF1Store from '../../store/useF1Store'
 import { getTeamColour, formatPitDuration } from '../../utils/driverUtils'
 import TyreIcon from '../../components/ui/TyreIcon'
 import SpeedTrapBoard from '../../components/ui/SpeedTrapBoard'
+import { PIT_LOG_COLUMNS, PIT_LOG_TEMPLATE } from '../../utils/layoutConstants'
+import { useOpenF1PitStops } from '../../hooks/useOpenF1'
 import { EmptyState } from '../../components/ui/EmptyState'
 import useRaceWeekendState from '../../hooks/useRaceWeekendState'
 import teamsData from '../../data/teams.json'
@@ -103,6 +105,49 @@ function GapChart({ gapHistory, top5, drivers }) {
   )
 }
 
+/**
+ * Pit lane time for one stop.
+ *
+ * Every row used to render formatPitDuration(null) as "---.---s", which looks
+ * exactly like a broken formatter. Three genuinely different states must not
+ * look the same:
+ *   - an official timing from OpenF1 /v1/pit (lane time: entry to exit loop)
+ *   - a live estimate measured client-side while the session is running
+ *   - no timing published yet
+ *
+ * stop_duration (stationary time) is frequently absent: it was null for all 25
+ * stops of the 2026 Singapore GP, so lane time is what we can actually show.
+ */
+function PitDuration({ stop }) {
+  const value = stop.lane_duration ?? stop.pit_duration ?? stop.duration ?? null
+
+  if (value == null) {
+    return (
+      <span
+        className="font-mono text-[10px] text-pitwall-ghost italic"
+        title="Pit lane timing has not been published for this stop yet"
+      >
+        not timed
+      </span>
+    )
+  }
+
+  const numeric = typeof value === 'number' ? value : parseFloat(String(value))
+  return (
+    <span className="font-mono text-xs text-pitwall-text-strong font-semibold tabular-nums">
+      {Number.isFinite(numeric) ? `${numeric.toFixed(1)}s` : String(value)}
+      {stop.duration_is_estimate && (
+        <span
+          className="ml-1 text-[8px] text-pitwall-ghost align-middle"
+          title="Measured in the browser from pit entry to exit, not an official timing"
+        >
+          ~
+        </span>
+      )}
+    </span>
+  )
+}
+
 // ── Collapsible Driver Pit Group ──────────────────────────────────────────────
 function DriverPitGroup({ group }) {
   const [expanded, setExpanded] = useState(false)
@@ -116,60 +161,61 @@ function DriverPitGroup({ group }) {
   return (
     <div className="flex flex-col border-b border-pitwall-border/20">
       {/* Latest / main stop row */}
-      <div 
-        className={`flex items-center h-10 gap-0 transition-colors select-none ${
+      <div
+        className={`grid items-center h-10 px-4 gap-3 transition-colors select-none ${
           hasHistory ? 'cursor-pointer hover:bg-pitwall-surface/20' : 'hover:bg-pitwall-surface/10'
         }`}
+        style={{ gridTemplateColumns: PIT_LOG_TEMPLATE }}
         onClick={() => hasHistory && setExpanded(!expanded)}
       >
-        <div className="w-10 text-center font-mono text-xs text-pitwall-dim font-bold">
+        <div className="text-center font-mono text-xs text-pitwall-dim font-bold tabular-nums">
           {latestStop.lap}
         </div>
-        <div className="w-[3px] h-5 mr-2" style={{ backgroundColor: latestStop.teamColour ?? '#444' }} />
-        <div className="w-12 font-display font-extrabold text-xs text-pitwall-text-strong tracking-wider">
+        <div className="h-5 w-full" style={{ backgroundColor: latestStop.teamColour ?? '#444' }} />
+        <div className="font-display font-extrabold text-xs text-pitwall-text-strong tracking-wider truncate">
           {latestStop.code}
         </div>
-        <div className="w-12 text-center font-display text-[9px] text-pitwall-ghost font-bold flex items-center justify-center gap-1">
-          STOP {latestStop.stop_number}
+        <div className="text-center font-display text-[9px] text-pitwall-ghost font-bold flex items-center justify-center gap-1">
+          {latestStop.stop_number}
           {latestStop.is_sc && (
-            <span className="text-status-yellow font-extrabold text-[8px] px-1 py-0.2 bg-status-yellow/15 border border-status-yellow/30 rounded" title="Stop executed under Safety Car or Red Flag">
+            <span className="text-status-yellow font-extrabold text-[8px] px-1 bg-status-yellow/15 border border-status-yellow/30 rounded" title="Stop executed under Safety Car or Red Flag">
               SC
             </span>
           )}
         </div>
-        <div className="w-20 font-mono text-xs text-pitwall-text-strong font-semibold">
-          {formatPitDuration(latestStop.duration)}
-        </div>
-        <div className="flex-1 font-display text-[9px] text-pitwall-dim font-bold uppercase flex items-center gap-1.5">
-          {latestStop.old_compound && (
+        <PitDuration stop={latestStop} />
+        <div className="font-display text-[9px] text-pitwall-dim font-bold uppercase flex items-center gap-1.5 min-w-0">
+          {latestStop.old_compound && latestStop.old_compound !== 'UNKNOWN' && (
             <>
-              <span className="text-pitwall-ghost">OUT:</span>
-              <span className="text-pitwall-text-strong">{latestStop.old_compound}</span>
+              <span className="text-pitwall-text-strong truncate">{latestStop.old_compound}</span>
+              <span className="text-pitwall-ghost">-&gt;</span>
             </>
           )}
+          {latestStop.new_compound && latestStop.new_compound !== 'UNKNOWN'
+            ? <TyreIcon compound={latestStop.new_compound} compact />
+            : <span className="text-pitwall-ghost">&mdash;</span>}
         </div>
-        <div className="w-16 flex items-center justify-end pr-4 gap-2">
-          {latestStop.new_compound && <TyreIcon compound={latestStop.new_compound} compact />}
-          
+        <div className="flex items-center justify-end">
           {hasHistory && (
-            <span 
-              className={`text-[8px] px-1.5 py-0.5 border border-pitwall-border rounded-sm text-pitwall-ghost bg-white/5 font-extrabold select-none transition-all duration-200 ${
+            <span
+              className={`text-[8px] px-1.5 py-0.5 border border-pitwall-border rounded-sm text-pitwall-ghost bg-white/5 font-extrabold select-none whitespace-nowrap transition-all duration-200 ${
                 expanded ? 'bg-status-red/15 border-status-red/35 text-status-red shadow-sm' : ''
               }`}
             >
-              {expanded ? 'CLOSE ▲' : `+${earlierStops.length} STOPS ▼`}
+              {expanded ? 'CLOSE' : `+${earlierStops.length}`}
             </span>
           )}
         </div>
       </div>
-      
+
       {/* Expanded history rows */}
       {hasHistory && expanded && (
         <div className="bg-black/25 divide-y divide-pitwall-border/10 border-t border-pitwall-border/15">
           {earlierStops.map((stop) => (
             <div 
               key={`earlier-${stop.driver_number}-${stop.stop_number}`}
-              className="flex items-center h-8 gap-0 pl-4 opacity-75 hover:opacity-100 transition-opacity"
+              className="grid items-center h-8 px-4 gap-3 opacity-75 hover:opacity-100 transition-opacity"
+              style={{ gridTemplateColumns: PIT_LOG_TEMPLATE }}
             >
               {/* Left nesting border indicator */}
               <div className="w-[1.5px] h-full bg-pitwall-border/40 mr-2" />
@@ -215,6 +261,14 @@ export default function StrategyTab() {
   const gapHistory = useF1Store((s) => s.gapHistory)
   const storePitStops = useF1Store((s) => s.pitStops)
   const raceControl = useF1Store((s) => s.raceControl)
+
+  const sessionKey = useF1Store((s) => s.currentSessionKey)
+  // Official pit lane timings. The log previously had no duration source at
+  // all once a session ended — stint-derived stops carry no timing and the
+  // live client-side estimate only exists while the feed is running — so every
+  // row rendered "---.---s", which reads as a broken formatter rather than
+  // missing data.
+  const { stops: officialPitStops } = useOpenF1PitStops(sessionKey)
 
   const weekendState = useRaceWeekendState()
   const circuitLaps  = weekendState.circuitData?.laps
@@ -317,8 +371,36 @@ export default function StrategyTab() {
       }
     })
     
+    // Attach official lane timings. Matched on driver + lap; the lap a stop is
+    // recorded against can differ by one between sources, so allow +/-1 before
+    // giving up rather than silently showing nothing.
+    if (officialPitStops.length > 0) {
+      const byDriver = {}
+      for (const o of officialPitStops) {
+        (byDriver[String(o.driver_number)] ||= []).push(o)
+      }
+      for (const stop of stops) {
+        const candidates = byDriver[String(stop.driver_number)] ?? []
+        const match = candidates.find((o) => o.lap_number === stop.lap)
+          ?? candidates.find((o) => Math.abs((o.lap_number ?? -99) - (stop.lap ?? 99)) <= 1)
+        if (match) {
+          stop.lane_duration = match.lane_duration ?? match.pit_duration ?? null
+          stop.stop_duration = match.stop_duration ?? null
+          stop.duration_is_estimate = false
+        } else if (stop.duration != null) {
+          // Client-measured fallback — flagged so the UI can mark it as an
+          // estimate rather than passing it off as an official timing.
+          stop.duration_is_estimate = true
+        }
+      }
+    } else {
+      for (const stop of stops) {
+        if (stop.duration != null) stop.duration_is_estimate = true
+      }
+    }
+
     return stops.sort((a, b) => (b.lap ?? 0) - (a.lap ?? 0))
-  }, [stintsByDriver, drivers, storePitStops, raceControl])
+  }, [stintsByDriver, drivers, storePitStops, raceControl, officialPitStops])
 
   // Group stops by driver and sort groups by the latest stop's lap descending
   const groupedPitStops = useMemo(() => {
@@ -343,7 +425,10 @@ export default function StrategyTab() {
   }, [pitStops])
 
   const hasTyres = Object.keys(stintsByDriver).length > 0
-  const isSessionActive = session.phase !== 'PRE' && ['LIVE', 'RACE'].includes(session.phase) && sortedTimings.length > 0
+  // Show strategy whenever there IS strategy to show. Gating on a live phase
+  // meant the stint timeline, pit log and trap speeds all vanished the moment
+  // the chequered flag fell — which is precisely when you want to review them.
+  const isSessionActive = session.phase !== 'PRE' && sortedTimings.length > 0
 
   if (!isSessionActive) {
     return (
@@ -351,7 +436,7 @@ export default function StrategyTab() {
         <EmptyState
           icon="⏱️"
           title="Strategy Feed Standby"
-          message="Tyre stint lifecycles, compound degradation, and pit stop analysis will activate when the race starts."
+          message="Tyre stints, pit stops and trap speeds appear once cars are on track, and stay available after the session ends."
           className="w-full max-w-lg my-0"
         />
       </div>
@@ -449,14 +534,22 @@ export default function StrategyTab() {
           Pit Stop Log
         </div>
         {/* Header row */}
-        <div className="flex items-center h-7 border-b border-pitwall-border bg-pitwall-surface-2/40">
-          <div className="w-10 text-center font-display font-bold text-[9px] text-pitwall-ghost">LAP</div>
-          <div className="w-[3px] mr-2" />
-          <div className="w-12 font-display font-bold text-[9px] text-pitwall-ghost">DRV</div>
-          <div className="w-10 text-center font-display font-bold text-[9px] text-pitwall-ghost">STOP</div>
-          <div className="w-20 font-display font-bold text-[9px] text-pitwall-ghost">DURATION</div>
-          <div className="flex-1 font-display font-bold text-[9px] text-pitwall-ghost">OUT COMPOUND</div>
-          <div className="w-16 text-right pr-4 font-display font-bold text-[9px] text-pitwall-ghost">NEW</div>
+        {/* Same PIT_LOG_TEMPLATE as the rows - aligned by construction. */}
+        <div
+          className="grid items-center h-7 px-4 gap-3 border-b border-pitwall-border bg-pitwall-surface-2/40"
+          style={{ gridTemplateColumns: PIT_LOG_TEMPLATE }}
+          role="row"
+        >
+          {PIT_LOG_COLUMNS.map((col) => (
+            <div
+              key={col.key}
+              role="columnheader"
+              className="font-display font-bold text-[9px] text-pitwall-ghost tracking-widest"
+              style={{ textAlign: col.align }}
+            >
+              {col.label}
+            </div>
+          ))}
         </div>
         <div className="overflow-y-auto divide-y divide-pitwall-border/30 bg-pitwall-bg" style={{ maxHeight: '300px' }}>
           {groupedPitStops.length === 0 ? (

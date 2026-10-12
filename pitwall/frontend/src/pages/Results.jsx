@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
+import { teamColour as sharedTeamColour } from '../utils/teamColours'
 import useRaceWeekendState from '../hooks/useRaceWeekendState'
 import RaceStoryStack from '../components/results/RaceStoryStack'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -12,16 +13,15 @@ const BASE = 'https://api.jolpi.ca/ergast/f1/2026'
 
 function getFlag(country) { return getCountryAbbreviation(country) }
 
-const TEAM_COL_MAP = {
-  'Red Bull': '#3671C6', Ferrari: '#E8002D', Mercedes: '#27F4D2',
-  McLaren: '#FF8000', 'Aston Martin': '#229971', Alpine: '#FF87BC',
-  Williams: '#64C4FF', RB: '#6692FF', Haas: '#B6BABD', Sauber: '#52E252',
-  Audi: '#A6A6A6', Cadillac: '#EEB211',
-}
-function teamColour(name) {
-  return Object.entries(TEAM_COL_MAP).find(([k]) =>
-    name?.toLowerCase().includes(k.toLowerCase())
-  )?.[1] ?? '#666'
+/**
+ * Team colour from the shared table. This page carried its own livery map
+ * (a fourth copy, with pre-2026 values), so podium cards and the
+ * classification rendered Mercedes as #27F4D2 and Cadillac as #EEB211 —
+ * both unreadable on a light background. Codes and names are TEXT, so they
+ * take the 4.5:1 variant.
+ */
+function teamColour(name, role = 'text') {
+  return sharedTeamColour(name, { role })
 }
 
 // ── Podium card — stepped glass stands, glowing team colors ───────────────────
@@ -541,7 +541,7 @@ export default function Results() {
 
                       {/* Points */}
                       <div className="w-12 text-right pr-4 font-mono text-xs font-bold"
-                        style={{ color: parseInt(r.points) > 0 ? 'var(--pw-yellow)' : 'var(--pw-ghost)' }}>
+                        style={{ color: parseInt(r.points) > 0 ? 'var(--pw-yellow-text)' : 'var(--pw-ghost)' }}>
                         {r.points}
                       </div>
                     </motion.div>

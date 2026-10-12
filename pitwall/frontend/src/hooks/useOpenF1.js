@@ -169,3 +169,32 @@ export async function lookupSessionKey(year, circuitShortName, sessionName) {
     return null
   }
 }
+
+// ── Pit stops ────────────────────────────────────────────────────────────────
+/**
+ * Official pit timings for a session.
+ *
+ * `pit_duration` / `lane_duration` is PIT LANE time — entry loop to exit loop.
+ * `stop_duration` (stationary time) is frequently null: it was null for all 25
+ * stops of the 2026 Singapore GP. The UI must distinguish "not published" from
+ * a formatting failure rather than rendering a placeholder like "---.---s".
+ *
+ * Needs a real OpenF1 session key (store.currentSessionKey).
+ */
+export function useOpenF1PitStops(sessionKey) {
+  const [stops, setStops] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!sessionKey) { setStops([]); return }
+    let cancelled = false
+    setLoading(true)
+    openf1Get('v1/pit', { session_key: sessionKey })
+      .then((d) => { if (!cancelled) setStops(Array.isArray(d) ? d : []) })
+      .catch(() => { if (!cancelled) setStops([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [sessionKey])
+
+  return { stops, loading }
+}

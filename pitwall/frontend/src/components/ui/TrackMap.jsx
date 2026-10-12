@@ -33,8 +33,37 @@ function renderCircuit(canvas, coordinates, W, H, progress = 1, circuitData = nu
   const dLng = (maxLng - minLng) || 0.001
   const dLat = (maxLat - minLat) || 0.001
 
-  const toX = (lng) => (((lng - minLng) / dLng) * (1 - 2 * pad) + pad) * W
-  const toY = (lat) => ((1 - (lat - minLat) / dLat) * (1 - 2 * pad) + pad) * H
+  // Uniform scale, centred — the circuit keeps its real proportions whatever
+  // shape the container is.
+  //
+  // Longitude and latitude used to be scaled INDEPENDENTLY to fill the box
+  // (`/dLng * W` and `/dLat * H`), which stretches the track to the container's
+  // aspect ratio. In the Live sidebar that box is about 600x140, so a roughly
+  // square circuit was smeared into a wide smudge that looked nothing like the
+  // real layout — the same component looked fine on Home only because its box
+  // happens to be closer to square.
+  //
+  // One degree of longitude is also shorter than one degree of latitude by
+  // cos(latitude), so an unweighted lng/lat plot is horizontally stretched even
+  // at a correct aspect ratio — noticeably so away from the equator
+  // (Zandvoort at 52 degrees N is compressed to ~61% of its naive width).
+  // Scaling x by cos(mean latitude) is the standard equirectangular correction
+  // and is what makes the printed shape match the circuit.
+  const lngScale = Math.cos(((minLat + maxLat) / 2) * Math.PI / 180) || 1
+  const spanX = dLng * lngScale
+  const spanY = dLat
+
+  const availW = W * (1 - 2 * pad)
+  const availH = H * (1 - 2 * pad)
+  const scale  = Math.min(availW / spanX, availH / spanY)
+
+  const drawW = spanX * scale
+  const drawH = spanY * scale
+  const offX  = (W - drawW) / 2
+  const offY  = (H - drawH) / 2
+
+  const toX = (lng) => offX + (lng - minLng) * lngScale * scale
+  const toY = (lat) => offY + (maxLat - lat) * scale
 
   // Calculate coordinates up to progress * pts.length
   const limit = Math.max(1, Math.floor(pts.length * progress))

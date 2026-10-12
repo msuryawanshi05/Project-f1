@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import useF1Store from '../store/useF1Store'
@@ -15,7 +15,8 @@ import StrategyTab from './live/StrategyTab'
 import TelemetryTab from './live/TelemetryTab'
 import RadioTab from './live/RadioTab'
 import { useQualifyingGrid } from '../hooks/useQualifyingGrid'
-import { getTowerColumns, towerGridTemplate, towerMinWidth } from '../utils/layoutConstants'
+import { getTowerColumns, towerGridTemplate, towerMinWidth, LIVE_SPACING, SIDEBAR } from '../utils/layoutConstants'
+import useResizableSidebar from '../hooks/useResizableSidebar'
 import { getQualifyingCut, isQualifyingSessionName, qualifyingHeaderLabel } from '../utils/qualifyingUtils'
 import { SessionState, sessionStateLabel } from '../utils/sessionLifecycle'
 import QualifyingGridTower from '../components/ui/QualifyingGridTower'
@@ -89,7 +90,7 @@ function WeekendPanel({ weekendState, weather }) {
         <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase mb-3">Weather</div>
         {weather ? (
           <>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="grid grid-cols-3 gap-3">
               <WeatherTile label="Track Temp" value={`${weather.track_temp ?? '—'}°C`} />
               <WeatherTile label="Air Temp"   value={`${weather.air_temp ?? '—'}°C`} />
               <WeatherTile label="Humidity"   value={`${weather.humidity ?? '—'}%`} />
@@ -302,6 +303,7 @@ export default function Live() {
   const [activeTab, setActiveTab]           = useState('TOWER')
   const [expandedDriver, setExpandedDriver] = useState(null)
   const [showSidebar, setShowSidebar]       = useState(true)
+  const splitRef = useRef(null)
   const [preRaceView, setPreRaceView]       = useState('GRID') // 'GRID' | 'COUNTDOWN'
 
   // Expose setActiveTab to window so keyboard shortcuts can switch tabs
@@ -324,6 +326,38 @@ export default function Live() {
   const qualifying  = useF1Store((s) => s.qualifying)
 
   const weekendState = useRaceWeekendState()
+  const storeResults = useF1Store((s) => s.results)
+  const setResults   = useF1Store((s) => s.setResults)
+
+  // While waiting on a classification, poll for it. Without this the Live page
+  // would sit on "awaiting official results" indefinitely: nothing else fetches
+  // that round, so the lifecycle could never learn the results had landed and
+  // move on. Jolpica publishes minutes to hours after the flag.
+  const pendingRound = weekendState.mode === 'RESULTS_PENDING'
+    ? weekendState.currentRace?.round ?? null
+    : null
+
+  useEffect(() => {
+    if (pendingRound == null) return
+    const existing = storeResults[pendingRound]
+    if (existing && !existing.pending && !existing.empty) return
+
+    let cancelled = false
+    const check = async () => {
+      try {
+        const res = await fetch(`https://api.jolpi.ca/ergast/f1/2026/${pendingRound}/results.json`)
+        if (!res.ok) return
+        const json = await res.json()
+        const race = json?.MRData?.RaceTable?.Races?.[0]
+        if (!cancelled && race?.Results?.length) setResults(pendingRound, race)
+      } catch { /* transient — the interval will try again */ }
+    }
+    check()
+    const id = setInterval(check, 3 * 60 * 1000)
+    return () => { cancelled = true; clearInterval(id) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRound])
+
   // `isLive` means timing is still changing. The provisional window also
   // renders the tower but is NOT live, so the two must not be conflated.
   const isLive        = weekendState.isLive === true
@@ -481,6 +515,15 @@ export default function Live() {
   const qualiPart = qualifying.part ?? null
   const towerMode = isQualifyingSession ? 'QUALI' : 'RACE'
   const towerColumns = getTowerColumns(towerMode)
+  const towerMin = towerMinWidth(towerColumns)
+
+  // Drag-to-resize. The tower minimum is passed in so the sidebar can never be
+  // widened to the point where the tower's columns no longer fit.
+  const sidebar = useResizableSidebar({
+    containerRef: splitRef,
+    towerMinWidth: towerMin,
+    enabled: showSidebar,
+  })
 
   // Cut maths lives in utils/qualifyingUtils (pure + tested) because an
   // off-by-one here tells viewers the wrong drivers are being eliminated.
@@ -650,13 +693,12 @@ export default function Live() {
 
       {/* ── TOWER TAB ─────────────────────────────────────────────── */}
       {activeTab === 'TOWER' && (
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+        <div ref={splitRef} className="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
           {/* Timing tower — full width on md, dynamically expands if sidebar is hidden */}
           <SpotlightPanel 
-            className={`flex flex-col border-b lg:border-b-0 border-pitwall-border overflow-hidden w-full transition-all duration-300 ${
-              showSidebar ? 'lg:w-[58%] lg:border-r' : 'lg:w-full border-r-0'
-            }`}
+            className="flex flex-col border-b lg:border-b-0 border-pitwall-border overflow-hidden w-full lg:flex-1"
+            style={{ minWidth: 0 }}
           >
 
             {/* Session header */}
@@ -746,7 +788,7 @@ export default function Live() {
                 )}
 
                 {/* Driver rows / starting grid / skeleton / smart empty state */}
-                <div className={`flex-1 ${(!isSessionActive && showStartingGrid) ? 'px-0 py-0' : 'px-4 py-1.5'}`}>
+                <div className={`flex-1 ${(!isSessionActive && showStartingGrid) ? 'px-0 py-0' : 'px-4 py-2'}`}>
                   {(!isSessionActive || sortedTiming.length === 0) ? (
                     showStartingGrid ? (
                       <QualifyingGridTower grid={qualifyingGrid} raceInfo={qualiRaceInfo} loading={qualiLoading} />
@@ -811,24 +853,55 @@ export default function Live() {
 
           {/* Right panel — track map + weather/schedule */}
           {showSidebar && (
-            <div className="hidden lg:flex flex-col overflow-hidden transition-all duration-300" style={{ width: '42%' }}>
+            <>
+            {/* Drag handle on the sidebar's inner edge. role=separator with
+                aria-valuenow is the standard pattern for a resizable split, and
+                it is focusable so the layout can be adjusted without a mouse. */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize sidebar"
+              aria-valuenow={sidebar.width}
+              aria-valuemin={SIDEBAR.min}
+              aria-valuemax={SIDEBAR.max}
+              tabIndex={0}
+              onPointerDown={sidebar.onPointerDown}
+              onKeyDown={sidebar.onKeyDown}
+              onDoubleClick={() => sidebar.onKeyDown({ key: 'Home', preventDefault() {} })}
+              title="Drag to resize · double-click to reset · arrow keys when focused"
+              className={`hidden lg:flex items-center justify-center flex-shrink-0 cursor-col-resize group border-l border-pitwall-border transition-colors ${
+                sidebar.dragging ? 'bg-status-red/30' : 'hover:bg-status-red/20'
+              }`}
+              style={{ width: SIDEBAR.handle }}
+            >
+              <span
+                className={`w-[2px] h-8 rounded-full transition-colors ${
+                  sidebar.dragging ? 'bg-status-red' : 'bg-pitwall-border group-hover:bg-status-red/60'
+                }`}
+                aria-hidden="true"
+              />
+            </div>
+            <div
+              className="hidden lg:flex flex-col overflow-hidden flex-shrink-0"
+              style={{ width: sidebar.width }}
+            >
               <div className="flex-1 border-b border-pitwall-border overflow-hidden"
                 style={{ background: 'var(--pw-surface)' }}>
-                <div className="px-4 pt-3 pb-1 border-b border-pitwall-border">
+                <div className="px-4 py-2 border-b border-pitwall-border">
                   <span className="font-mono text-[10px] tracking-widest uppercase"
                     style={{ color: 'var(--pw-ghost)' }}>
                     {showsTower ? 'Track Map' : 'Circuit'}
                   </span>
                 </div>
-                <div className="p-4 overflow-y-auto h-full">
+                <div className="p-3 overflow-y-auto h-full">
                   {showsTower ? (
                     /* Running or provisional — map + weather + race control */
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-3">
                       <TrackMap circuitData={weekendState.circuitData} compact showStats={false} />
                       <div className="font-mono text-[10px] text-pitwall-ghost tracking-widest uppercase mb-2">Weather</div>
                       {weather ? (
                         <>
-                          <div className="grid grid-cols-2 gap-2 mb-2">
+                          <div className="grid grid-cols-3 gap-3">
                             <WeatherTile label="Track Temp" value={`${weather.track_temp ?? '—'}°C`} />
                             <WeatherTile label="Air Temp"   value={`${weather.air_temp ?? '—'}°C`} />
                             <WeatherTile label="Humidity"   value={`${weather.humidity ?? '—'}%`} />
@@ -884,6 +957,7 @@ export default function Live() {
                 </div>
               </div>
             </div>
+            </>
           )}
         </div>
       )}

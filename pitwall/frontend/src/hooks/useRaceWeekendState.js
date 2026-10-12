@@ -71,6 +71,7 @@ export default function useRaceWeekendState() {
   const raceControl = useF1Store((s) => s.raceControl)
   const timing      = useF1Store((s) => s.timing)
   const sessionMeta = useF1Store((s) => s.sessionMeta)
+  const results     = useF1Store((s) => s.results)
 
   return useMemo(() => {
     const now = new Date()
@@ -99,6 +100,21 @@ export default function useRaceWeekendState() {
     // After the chequered flag session.lap is 62 and timing is still populated
     // from the retained cache, so the last two disjuncts stayed true forever
     // and a finished race never stopped being "live".
+    // Which round are we most likely waiting on, and do we already have its
+    // classification cached?
+    const latestStartedRound = [...calendar]
+      .filter((race) => {
+        const sessions = buildSessions(race)
+        const last = sessions[sessions.length - 1]?.dt
+        return last && now >= last
+      })
+      .sort((a, b) => Number(a.round) - Number(b.round))
+      .at(-1)?.round ?? null
+    const cachedResult = latestStartedRound != null ? results[latestStartedRound] : null
+    const hasPublishedResults = Boolean(
+      cachedResult && !cachedResult.empty && !cachedResult.pending && !cachedResult.ongoing
+    )
+
     const feedLive = isFormation
       || ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase)
     const lifecycle = resolveSessionState({
@@ -110,6 +126,11 @@ export default function useRaceWeekendState() {
       liveFeedActive: feedLive && session.phase !== 'FINISHED',
       feedFinished: session.phase === 'FINISHED',
       hasTimingState: timing.length > 0,
+      // Results supersede the provisional/pending states. `results` is keyed by
+      // round and populated by the Results page (and by the Live page's own
+      // check), so once a classification is published the Live page stops
+      // saying it is waiting for one.
+      hasOfficialResults: hasPublishedResults,
     })
 
     if (lifecycle.showTower) {
@@ -167,11 +188,18 @@ export default function useRaceWeekendState() {
     // state so the Live page can say whether official results are merely
     // pending (Jolpica lags by minutes to hours) rather than showing nothing.
     if (lifecycle.state === SessionState.RESULTS_PENDING) {
-      const finishedRace = calendar.find((race) => {
-        const sessions = buildSessions(race)
-        const last = sessions[sessions.length - 1]?.dt
-        return last && now - last < 12 * 60 * 60 * 1000 && now >= last
-      }) ?? null
+      // The most recently STARTED race. There is deliberately no upper time
+      // bound: a classification can stay unpublished for many hours, and a
+      // 12-hour cap meant that a day later we could no longer name the race we
+      // were waiting on, so the panel lost its circuit, title and map.
+      const finishedRace = [...calendar]
+        .filter((race) => {
+          const sessions = buildSessions(race)
+          const last = sessions[sessions.length - 1]?.dt
+          return last && now >= last
+        })
+        .sort((a, b) => Number(a.round) - Number(b.round))
+        .at(-1) ?? null
       return {
         mode: 'RESULTS_PENDING',
         sessionState: lifecycle.state,
@@ -333,5 +361,5 @@ export default function useRaceWeekendState() {
     // (isLivePhase / isFormation), so they must be listed. Without them the
     // mode never flipped to SESSION_LIVE when timing started arriving without
     // an accompanying phase change.
-  }, [session.phase, session.lap, calendar, raceControl, timing, sessionMeta])
+  }, [session.phase, session.lap, calendar, raceControl, timing, sessionMeta, results])
 }
