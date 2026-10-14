@@ -105,11 +105,18 @@ app = FastAPI(title="PITWALL Backend", version="0.4.0", lifespan=lifespan)
 # app on 127.0.0.1:5173 had every backend call blocked by CORS.
 _cors_env = os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:4173,"
+    "https://project-f1.antideploy.app,http://localhost:5173,http://localhost:4173,"
     "http://127.0.0.1:5173,http://127.0.0.1:4173",
 )
 _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
 
+# A "*" entry alongside named origins makes the named ones meaningless — the
+# wildcard wins and every origin is allowed. Dropped: the deployed build is
+# served from this same origin, so it needs no CORS at all, and the named
+# localhost entries cover local development.
+#
+# GET only, because every route here is a read. Widening to "*" grants methods
+# the API does not implement.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -924,6 +931,67 @@ async def circuit_info(article: str):
 
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, functools.partial(_fetch))
+
+
+# ── Static SPA Serving ────────────────────────────────────────────────────────
+# Serves the built frontend from the same origin as the API, for deployments
+# that run one service instead of a separate static host.
+from pathlib import Path as _Path
+
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+_dist_dir = (_Path(__file__).parent / "static_frontend").resolve()
+_index_file = _dist_dir / "index.html"
+
+# Paths owned by the API. The SPA catch-all must not answer these: returning
+# index.html for an unknown /api/... path turns a 404 into a 200 of HTML, which
+# a fetch() then fails to parse with a misleading error.
+_API_PREFIXES = ("api/", "health", "ws")
+
+if _index_file.is_file():
+    _assets_dir = _dist_dir / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+
+    def _safe_static_path(relative: str) -> _Path | None:
+        """
+        Resolve `relative` inside the build directory, or None if it escapes.
+
+        The containment check is the point. Joining a request path straight onto
+        a directory and serving whatever comes out is a path traversal: with no
+        proxy normalising the URL first, GET /../main.py returns this file's own
+        source. Verified against this app before the fix — the hosted platform
+        happened to reject it at the edge, but that is the proxy's doing, not
+        the application's, and it does not protect anyone running this locally
+        or behind a different front end.
+        """
+        if not relative:
+            return None
+        try:
+            candidate = (_dist_dir / relative).resolve()
+            candidate.relative_to(_dist_dir)   # raises if outside
+        except (ValueError, OSError):
+            return None
+        return candidate if candidate.is_file() else None
+
+    @app.get("/")
+    async def serve_root():
+        return FileResponse(_index_file)
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        normalised = full_path.lstrip("/")
+        if normalised.startswith(_API_PREFIXES):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+
+        asset = _safe_static_path(normalised)
+        if asset is not None:
+            return FileResponse(asset)
+
+        # Anything else is a client-side route: hand back the shell so a deep
+        # link or a refresh works.
+        return FileResponse(_index_file)
 
 
 if __name__ == "__main__":

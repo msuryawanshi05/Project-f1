@@ -58,3 +58,6 @@ pitwall/backend/pitwall_cache.db
 # Playwright artefacts
 test-results/
 playwright-report/
+
+# Built frontend copied in for single-origin deploys — a build artefact
+pitwall/backend/static_frontend/

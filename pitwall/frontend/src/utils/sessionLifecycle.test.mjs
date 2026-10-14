@@ -170,3 +170,32 @@ check('RESULTS_PENDING label', sessionStateLabel(SessionState.RESULTS_PENDING), 
 check('unknown state label', sessionStateLabel('WAT'), 'NO SESSION')
 
 console.log(`\nall ${passed} assertions passed`)
+
+// ── Appended: RESULTS_PENDING must not persist indefinitely ────────────────
+// The deployed site sat in RESULTS_PENDING for three days after the Singapore
+// GP, because that state is only left when something fetches the round's
+// results and the home page never does. Home then labelled a race that had
+// already run as "NEXT RACE".
+console.log('\n--- RESULTS_PENDING expires ---')
+{
+  const { PENDING_MAX_MS } = await import('./sessionLifecycle.js')
+  const base = {
+    sessionStart: START, sessionEnd: END, feedFinished: true, hasOfficialResults: false,
+  }
+  check('still pending an hour after the flag',
+    resolveSessionState({ ...base, now: at(END) + 60 * 60 * 1000 }).state,
+    SessionState.RESULTS_PENDING)
+  check('still pending at the edge of the window',
+    resolveSessionState({ ...base, now: at(END) + PENDING_MAX_MS }).state,
+    SessionState.RESULTS_PENDING)
+  check('past the window it is no longer pending',
+    resolveSessionState({ ...base, now: at(END) + PENDING_MAX_MS + 1000 }).state,
+    SessionState.IDLE)
+  check('three days later (the deployed bug) is IDLE',
+    resolveSessionState({ ...base, now: at(END) + 3 * 86400 * 1000 }).state,
+    SessionState.IDLE)
+  check('an expired wait does not show the tower',
+    resolveSessionState({ ...base, now: at(END) + 3 * 86400 * 1000 }).showTower,
+    false)
+  console.log(`\nall ${passed} assertions passed`)
+}

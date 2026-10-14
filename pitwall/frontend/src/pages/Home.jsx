@@ -242,7 +242,18 @@ export default function Home() {
   const pastRaces   = calendar.filter((r) => getRaceStatus(r, now).isDone)
   const ongoingRace = calendar.find((r) => getRaceStatus(r, now).isOngoing)
   const upcomingRaces = calendar.filter((r) => !getRaceStatus(r, now).isDone && !getRaceStatus(r, now).isOngoing)
-  const nextRace    = ongoingRace ?? currentRace ?? upcomingRaces[0] ?? null
+  // `currentRace` from the lifecycle can be a race that has already run — it is
+  // "the race this app is currently concerned with", which after a chequered
+  // flag is the one that just finished. The hero bills its subject as THIS
+  // WEEKEND or NEXT RACE, so only use it when it has not happened yet;
+  // otherwise fall through to the genuinely next round. Without this the home
+  // page announced "NEXT RACE · ROUND 17 SINGAPORE GRAND PRIX" three days
+  // after Singapore had been run, while its own sidebar listed round 18 as
+  // upcoming.
+  const currentRaceIsUpcoming = currentRace
+    && !getRaceStatus(currentRace, now).isDone
+    && upcomingRaces.some((r) => String(r.round) === String(currentRace.round))
+  const nextRace    = ongoingRace ?? (currentRaceIsUpcoming ? currentRace : null) ?? upcomingRaces[0] ?? null
   const futureRaces = [ongoingRace, ...upcomingRaces].filter(Boolean)
 
   const countdownTarget = nextSession?.targetDt ?? (nextRace ? new Date(`${nextRace.date}T${nextRace.time ?? '13:00:00Z'}`) : null)

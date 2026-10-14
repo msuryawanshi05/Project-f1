@@ -40,6 +40,21 @@
 export const PROVISIONAL_WINDOW_MS = 30 * 60 * 1000
 
 /**
+ * How long "waiting for the official classification" stays a useful statement.
+ *
+ * Jolpica usually publishes within a few hours. But RESULTS_PENDING is only
+ * left when something actually fetches that round's results, and if nothing on
+ * the current page does, the state persists indefinitely — three days after
+ * the Singapore GP the deployed site still treated it as the current race and
+ * labelled it "NEXT RACE" on the home page.
+ *
+ * Past this window the session stops being the thing the app is waiting on and
+ * normal weekend logic resumes. The Results page still reports a missing
+ * classification where it genuinely fetches one.
+ */
+export const PENDING_MAX_MS = 12 * 60 * 60 * 1000
+
+/**
  * Grace past the scheduled end before we stop believing a session is running.
  *
  * Deliberately small. Red-flagged sessions do overrun their scheduled end, but
@@ -127,7 +142,8 @@ export function resolveSessionState({
       return build(SessionState.PROVISIONAL)
     }
     if (msSinceEnd != null && msSinceEnd > 0) {
-      return build(SessionState.RESULTS_PENDING)
+      // Stop claiming to be mid-wait once the wait has stopped being plausible.
+      return build(msSinceEnd <= PENDING_MAX_MS ? SessionState.RESULTS_PENDING : SessionState.IDLE)
     }
   }
 
