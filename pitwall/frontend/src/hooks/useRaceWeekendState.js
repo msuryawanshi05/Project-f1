@@ -21,48 +21,68 @@
 import { useMemo } from 'react'
 import useF1Store from '../store/useF1Store'
 import { matchCircuit } from '../utils/circuitUtils'
-import { resolveSessionState, SessionState } from '../utils/sessionLifecycle'
+import {
+  resolveSessionState, SessionState,
+  resolveWeekendState, allowedTabs, towerContentFor, WeekendState,
+} from '../utils/sessionLifecycle'
+import { buildSessions } from '../utils/sessionSchedule'
 
-const SESSION_LABELS = {
-  FirstPractice:    'FP1',
-  SecondPractice:   'FP2',
-  ThirdPractice:    'FP3',
-  SprintQualifying: 'SPRINT QUALIFYING',
-  Sprint:           'SPRINT',
-  Qualifying:       'QUALIFYING',
-  Race:             'RACE',
+
+/**
+ * Weekend-level view for the Live tab: which GP owns it right now, which
+ * session it is about, which sub-tabs may render, and what the Tower shows.
+ *
+ * Separate from the per-session lifecycle above. That one answers "is THIS
+ * session running / provisional / waiting on results"; this one answers "which
+ * session are we even talking about", which is what decides whether strategy
+ * and telemetry have anything real to show.
+ */
+/**
+ * The feed names sessions ("Race", "Qualifying", "Sprint Qualifying"); the
+ * schedule keys them by Jolpica's field names. Only report a live key when the
+ * feed says the session is actually running — a stale name from a finished
+ * session would otherwise pin the weekend state to SESSION_LIVE forever, which
+ * is the same defect Phase C fixed at the session level.
+ */
+function sessionKeyFromName(name, phase) {
+  if (!name || phase !== 'LIVE') return null
+  const n = String(name).toUpperCase()
+  if (n.includes('SPRINT') && (n.includes('QUALI') || n.includes('SHOOTOUT'))) return 'SprintQualifying'
+  if (n.includes('SPRINT')) return 'Sprint'
+  if (n.includes('QUALI') || n.includes('SHOOTOUT')) return 'Qualifying'
+  if (n.includes('PRACTICE 1') || n === 'FP1') return 'FirstPractice'
+  if (n.includes('PRACTICE 2') || n === 'FP2') return 'SecondPractice'
+  if (n.includes('PRACTICE 3') || n === 'FP3') return 'ThirdPractice'
+  if (n.includes('RACE')) return 'Race'
+  return null
 }
 
-/** Build ordered session list from a race object */
-function buildSessions(race) {
-  const order = ['FirstPractice', 'SecondPractice', 'ThirdPractice', 'SprintQualifying', 'Sprint', 'Qualifying']
-  const sessions = []
+function buildWeekendView(calendar, now, { liveSessionKey = null, actualEnds = {} } = {}) {
+  // The GP that owns the Live tab is the one whose Thursday-to-Wednesday window
+  // contains `now`. Evaluated per race because each window is anchored in that
+  // circuit's own timezone.
+  for (const race of calendar) {
+    const sessions = buildSessions(race)
+    if (!sessions.length) continue
+    const circuit = matchCircuit(race)
+    const timeZone = circuit?.timezone ?? 'UTC'
 
-  for (const key of order) {
-    if (race[key]?.date) {
-      sessions.push({
-        key,
-        label: SESSION_LABELS[key],
-        date:  race[key].date,
-        time:  race[key].time ?? '12:00:00Z',
-      })
+    const weekend = resolveWeekendState({
+      now: now.getTime(), sessions, timeZone, liveSessionKey, actualEnds,
+    })
+    if (weekend.state === WeekendState.OUTSIDE) continue
+
+    return {
+      ...weekend,
+      race,
+      circuitData: circuit,
+      timeZone,
+      sessions,
+      tabs: allowedTabs({ ...weekend, sessions, now: now.getTime() }),
+      towerContent: towerContentFor({ ...weekend, sessions, now: now.getTime() }),
     }
   }
-
-  // Race always last
-  if (race.date) {
-    sessions.push({
-      key:   'Race',
-      label: 'RACE',
-      date:  race.date,
-      time:  race.time ?? '14:00:00Z',
-    })
-  }
-
-  return sessions.map((s) => ({
-    ...s,
-    dt: new Date(`${s.date}T${s.time}`),
-  }))
+  return null
 }
 
 export default function useRaceWeekendState() {
@@ -75,6 +95,12 @@ export default function useRaceWeekendState() {
 
   return useMemo(() => {
     const now = new Date()
+
+    // The feed knows which session is actually running; the schedule only
+    // knows which one is scheduled. A delayed or red-flagged session is still
+    // live past its nominal end, so the feed's view wins where it has one.
+    const liveSessionKey = sessionKeyFromName(session.name, session.phase)
+    const weekend = buildWeekendView(calendar, now, { liveSessionKey })
 
     // ── SESSION_LIVE — trust the WebSocket phase, active lap count, or active formation lap ────────
     // A formation-lap message only means the session is starting if it is
@@ -169,6 +195,7 @@ export default function useRaceWeekendState() {
       const circuitData = race ? matchCircuit(race) : null
 
       return {
+        weekend,
         // SESSION_LIVE covers both a running session and the provisional
         // window, because both render the tower. `provisional` distinguishes
         // them and the header must not say "live" when it is set.
@@ -201,6 +228,7 @@ export default function useRaceWeekendState() {
         .sort((a, b) => Number(a.round) - Number(b.round))
         .at(-1) ?? null
       return {
+        weekend,
         mode: 'RESULTS_PENDING',
         sessionState: lifecycle.state,
         provisional: false,
@@ -215,6 +243,7 @@ export default function useRaceWeekendState() {
 
     if (!calendar.length) {
       return {
+        weekend,
         mode: 'OFF_WEEKEND',
         sessionState: SessionState.IDLE,
         provisional: false,
@@ -299,6 +328,7 @@ export default function useRaceWeekendState() {
         : 'WEEKEND_BETWEEN_SESSIONS'
 
       return {
+        weekend,
         mode,
         sessionState: lifecycle.state,
         provisional: false,
@@ -329,6 +359,7 @@ export default function useRaceWeekendState() {
       const mode = daysUntil <= 7 ? 'WEEKEND_UPCOMING' : 'OFF_WEEKEND'
 
       return {
+        weekend,
         mode,
         sessionState: lifecycle.state,
         provisional: false,
@@ -347,6 +378,7 @@ export default function useRaceWeekendState() {
     }
 
     return {
+      weekend,
       mode: 'OFF_WEEKEND',
       sessionState: SessionState.IDLE,
       provisional: false,

@@ -297,7 +297,7 @@
     "city": "Madrid",
     "lat": 40.46528,
     "lng": -3.61528,
-    "timezone": null,
+    "timezone": "Europe/Madrid",
     "laps": null,
     "length_km": 5.474,
     "lap_record": null,

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import TyreIcon from '../ui/TyreIcon'
 import useF1Store from '../../store/useF1Store'
 import { formatSessionTime } from '../../utils/driverUtils'
+import { buildSessions } from '../../utils/sessionSchedule'
 
 const OPEN_METEO = 'https://api.open-meteo.com/v1/forecast'
 const WIKI_API   = 'https://en.wikipedia.org/api/rest_v1/page/summary/'
@@ -111,14 +112,14 @@ export default function CircuitDetailPanel({ race, circuitData, onClose }) {
     fetchForecast()
   }, [fetchWiki, fetchForecast])
 
-  // Build session schedule from race object
-  const sessions = []
-  if (race?.FirstPractice)  sessions.push({ label: 'FP1',         ...race.FirstPractice })
-  if (race?.SecondPractice) sessions.push({ label: circuitData?.sprint ? 'SPRINT QUALI' : 'FP2', ...race.SecondPractice })
-  if (race?.ThirdPractice)  sessions.push({ label: 'FP3',         ...race.ThirdPractice })
-  if (race?.Sprint)         sessions.push({ label: 'SPRINT',      ...race.Sprint })
-  if (race?.Qualifying)     sessions.push({ label: 'QUALIFYING',  ...race.Qualifying })
-  sessions.push({ label: 'RACE', date: race?.date, time: race?.time })
+  // One shared builder, not a second opinion. This panel used to assemble its
+  // own list and label SecondPractice "SPRINT QUALI" whenever circuits.json
+  // carried a sprint flag — a guess, when the calendar feed names the session
+  // outright. On a sprint weekend that mislabelled the schedule the user reads.
+  const sessions = buildSessions(race)
+  // Whether this is a sprint weekend is a fact about the calendar entry, not
+  // a static property of the circuit — Jolpica names the Sprint session.
+  const isSprintWeekend = sessions.some((x) => x.key === 'Sprint')
 
   const raceName    = race?.raceName ?? circuitData?.name ?? 'Unknown GP'
   const circuitName = race?.Circuit?.circuitName ?? circuitData?.circuit ?? ''
@@ -142,7 +143,7 @@ export default function CircuitDetailPanel({ race, circuitData, onClose }) {
             <span className="font-mono text-[10px] text-pitwall-dim border border-pitwall-border px-1.5 py-0.5">
               ROUND {race?.round ?? '?'} OF {calendarLength || 24}
             </span>
-            {circuitData?.sprint && (
+            {isSprintWeekend && (
               <span className="font-mono text-[10px] text-status-yellow border border-status-yellow/30 bg-status-yellow/10 px-1.5 py-0.5 font-bold">
                 SPRINT
               </span>
@@ -205,7 +206,7 @@ export default function CircuitDetailPanel({ race, circuitData, onClose }) {
               {sessions.map((s) => {
                 const { date: dStr, ist } = formatSession(s.date, s.time, isCurrent)
                 return (
-                  <div key={s.label} className="flex items-center justify-between py-1.5 border-b border-pitwall-border/40">
+                  <div key={s.key} className="flex items-center justify-between py-1.5 border-b border-pitwall-border/40">
                     <span className="font-mono text-[10px] text-pitwall-dim w-24">{dStr}</span>
                     <span className="font-mono text-[11px] text-pitwall-text flex-1 px-2">{s.label}</span>
                     <span className="font-mono text-[11px] text-pitwall-text-strong font-semibold">{ist}</span>

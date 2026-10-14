@@ -18,7 +18,11 @@ import { useQualifyingGrid } from '../hooks/useQualifyingGrid'
 import { getTowerColumns, towerGridTemplate, towerMinWidth, LIVE_SPACING, SIDEBAR } from '../utils/layoutConstants'
 import useResizableSidebar from '../hooks/useResizableSidebar'
 import { getQualifyingCut, isQualifyingSessionName, qualifyingHeaderLabel } from '../utils/qualifyingUtils'
-import { SessionState, sessionStateLabel } from '../utils/sessionLifecycle'
+import {
+  SessionState, sessionStateLabel,
+  WeekendState, TowerContent, disabledTabMessage, LIVE_TABS,
+} from '../utils/sessionLifecycle'
+import { buildStartingGrid } from '../utils/startingGrid'
 import QualifyingGridTower from '../components/ui/QualifyingGridTower'
 
 // ── Countdown inline ──────────────────────────────────────────────────────────
@@ -296,7 +300,305 @@ function SkeletonDriverRow() {
   )
 }
 
-const TABS = ['TOWER', 'STRATEGY', 'TELEMETRY', 'RADIO']
+// ── Weekend phase cards ───────────────────────────────────────────────────────
+//
+// Three of the five weekend phases have no timing data by definition: before
+// FP1, between sessions, and the stretch after qualifying. Each gets a card
+// that says which phase it is and what happens next, because "empty tower" and
+// "broken tower" look identical otherwise.
+
+/** A session time in the circuit's own clock — the one the schedule is in. */
+function circuitTime(instant, timeZone) {
+  if (!Number.isFinite(instant)) return '—'
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(new Date(instant))
+  } catch {
+    return new Date(instant).toUTCString().slice(0, 16)
+  }
+}
+
+/** The same instant in the viewer's clock, for when the two differ. */
+function localTime(instant) {
+  if (!Number.isFinite(instant)) return '—'
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(instant))
+}
+
+function WeekendCountdown({ targetDt, label }) {
+  const seconds = useCountdownSeconds(targetDt)
+  if (seconds === null) {
+    return (
+      <div className="font-display text-sm text-status-red tracking-widest uppercase animate-pulse">
+        {label} starting
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="font-mono text-[10px] uppercase tracking-widest" style={{ color: 'var(--pw-ghost)' }}>
+        {label} starts in
+      </div>
+      <div className="font-mono text-2xl font-bold tabular-nums" style={{ color: 'var(--pw-text-strong)' }}>
+        {formatCountdown(seconds)}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The full running order for the weekend, with the phase marked.
+ *
+ * Times are shown in the circuit's timezone first — that is the clock the
+ * session times are quoted in everywhere else — and in the viewer's only when
+ * it differs, so a viewer at the track is not shown the same time twice.
+ */
+function WeekendRunningOrder({ weekend }) {
+  const { sessions = [], currentSession, nextSession, timeZone } = weekend
+  if (!sessions.length) return null
+
+  const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const sameZone = viewerZone === timeZone
+
+  return (
+    <div className="w-full max-w-sm mt-4">
+      <div className="flex items-baseline justify-between mb-2">
+        <span className="font-mono text-[9px] tracking-widest uppercase" style={{ color: 'var(--pw-ghost)' }}>
+          Weekend schedule
+        </span>
+        <span className="font-mono text-[9px]" style={{ color: 'var(--pw-ghost)' }}>
+          {sameZone ? 'local' : `circuit · ${timeZone?.split('/').pop()?.replace('_', ' ')}`}
+        </span>
+      </div>
+      {sessions.map((sess) => {
+        const done = currentSession ? sess.start < currentSession.start : false
+        const isCurrent = currentSession?.key === sess.key
+        const isNext = nextSession?.key === sess.key
+        return (
+          <div
+            key={sess.key}
+            className="flex items-center gap-2 py-1.5 border-b"
+            style={{ borderColor: 'var(--pw-border)' }}
+          >
+            <span className="font-mono text-[10px] w-4" style={{ color: 'var(--pw-ghost)' }}>
+              {done || isCurrent ? '✓' : isNext ? '▸' : '○'}
+            </span>
+            <span
+              className="font-mono text-[11px] flex-1 tracking-wide"
+              style={{
+                color: isNext ? 'var(--pw-text-strong)' : done ? 'var(--pw-ghost)' : 'var(--pw-dim)',
+                fontWeight: isNext ? 700 : 400,
+              }}
+            >
+              {sess.label}
+            </span>
+            <span className="font-mono text-[10px] tabular-nums" style={{ color: 'var(--pw-ghost)' }}>
+              {circuitTime(sess.start, timeZone)}
+              {!sameZone && <span className="ml-1.5 opacity-60">({localTime(sess.start)})</span>}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Before FP1: which Grand Prix this is, the running order, and the countdown. */
+function PreWeekendCard({ weekend }) {
+  const gp = weekend.race?.raceName?.replace(' Grand Prix', ' GP') ?? 'Race weekend'
+  return (
+    <div className="flex flex-col items-center justify-start h-full gap-2 px-6 py-8 overflow-y-auto text-center">
+      <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: 'var(--pw-ghost)' }}>
+        Race weekend · nothing has run yet
+      </div>
+      <div className="font-display text-base font-bold tracking-wide uppercase" style={{ color: 'var(--pw-text-strong)' }}>
+        {gp}
+      </div>
+      {weekend.circuitData && (
+        <div className="font-mono text-[11px]" style={{ color: 'var(--pw-dim)' }}>
+          {weekend.circuitData.circuit} · {weekend.circuitData.city}
+          {weekend.isSprintWeekend && (
+            <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold border border-status-red/40 bg-status-red/15 text-status-red">
+              SPRINT
+            </span>
+          )}
+        </div>
+      )}
+      {weekend.nextSession && (
+        <div className="mt-3">
+          <WeekendCountdown
+            targetDt={weekend.nextSession.start}
+            label={weekend.nextSession.label}
+          />
+        </div>
+      )}
+      <WeekendRunningOrder weekend={weekend} />
+      <div className="font-mono text-[10px] mt-4" style={{ color: 'var(--pw-ghost)', opacity: 0.6 }}>
+        The timing tower activates when the session goes green.
+      </div>
+    </div>
+  )
+}
+
+/** Inside the weekend, no session running, next one close enough to count down. */
+function GapIdleCard({ weekend }) {
+  const gp = weekend.race?.raceName?.replace(' Grand Prix', ' GP') ?? ''
+  return (
+    <div className="flex flex-col items-center justify-start h-full gap-2 px-6 py-8 overflow-y-auto text-center">
+      <span className="text-3xl" role="img" aria-hidden="true">⏱️</span>
+      <div className="font-display text-sm font-bold tracking-widest uppercase" style={{ color: 'var(--pw-text-strong)' }}>
+        No session active
+      </div>
+      <div className="font-mono text-[11px] max-w-xs leading-relaxed" style={{ color: 'var(--pw-dim)' }}>
+        PITWALL activates 5 minutes before each session.
+      </div>
+      {gp && (
+        <div className="font-mono text-[10px] tracking-widest uppercase mt-1" style={{ color: 'var(--pw-ghost)' }}>
+          {gp}
+        </div>
+      )}
+      {weekend.currentSession && (
+        <div className="font-mono text-[11px] mt-1" style={{ color: 'var(--pw-dim)' }}>
+          ✓ {weekend.currentSession.label} complete
+        </div>
+      )}
+      {weekend.nextSession && (
+        <div className="mt-3">
+          <WeekendCountdown targetDt={weekend.nextSession.start} label={weekend.nextSession.label} />
+        </div>
+      )}
+      <WeekendRunningOrder weekend={weekend} />
+    </div>
+  )
+}
+
+/**
+ * After the race, until the weekend window closes on Wednesday.
+ *
+ * The legacy layer moves `currentRace` on to the NEXT Grand Prix the moment a
+ * race finishes, which on Monday morning left the tower counting down to a race
+ * five days away while the page's own state said the weekend just gone was
+ * still the subject. Here the subject is the race that ran.
+ */
+function PostWeekendCard({ weekend, classification, nextRace, nextSessionDt }) {
+  const gp = weekend.race?.raceName?.replace(' Grand Prix', ' GP') ?? 'Grand Prix'
+  const podium = Array.isArray(classification) ? classification.slice(0, 3) : []
+  const seconds = useCountdownSeconds(nextSessionDt)
+
+  return (
+    <div className="flex flex-col items-center justify-start h-full gap-2 px-6 py-8 overflow-y-auto text-center">
+      <span className="text-3xl" role="img" aria-hidden="true">🏁</span>
+      <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: 'var(--pw-ghost)' }}>
+        Race complete
+      </div>
+      <div className="font-display text-base font-bold tracking-wide uppercase" style={{ color: 'var(--pw-text-strong)' }}>
+        {gp}
+      </div>
+      {weekend.circuitData && (
+        <div className="font-mono text-[11px]" style={{ color: 'var(--pw-dim)' }}>
+          {weekend.circuitData.circuit} · {weekend.circuitData.city}
+        </div>
+      )}
+
+      {podium.length > 0 ? (
+        <div className="w-full max-w-xs mt-4">
+          {podium.map((r, i) => (
+            <div
+              key={r.position ?? i}
+              className="flex items-center gap-3 py-2 border-b"
+              style={{ borderColor: 'var(--pw-border)' }}
+            >
+              <span className="font-mono text-[11px] w-5 font-bold" style={{ color: 'var(--pw-ghost)' }}>
+                P{r.position}
+              </span>
+              <span className="font-display text-xs font-bold flex-1 text-left tracking-wide" style={{ color: 'var(--pw-text-strong)' }}>
+                {r.Driver?.code ?? r.Driver?.familyName ?? '—'}
+              </span>
+              <span className="font-mono text-[10px] truncate" style={{ color: 'var(--pw-dim)' }}>
+                {r.Constructor?.name ?? ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* Jolpica publishes minutes to hours after the flag. Saying so beats an
+           empty podium that reads as a failure. */
+        <div className="font-mono text-[11px] max-w-xs leading-relaxed mt-3" style={{ color: 'var(--pw-dim)' }}>
+          Official classification has not been published yet. It usually appears within a
+          few hours of the chequered flag.
+        </div>
+      )}
+
+      <Link
+        to="/results"
+        className="font-mono text-[10px] tracking-widest uppercase underline mt-3"
+        style={{ color: 'var(--pw-ghost)' }}
+      >
+        Full results
+      </Link>
+
+      {nextRace && (
+        <div className="font-mono text-[10px] mt-6" style={{ color: 'var(--pw-ghost)' }}>
+          Next up · {nextRace.raceName?.replace(' Grand Prix', ' GP')}
+          {seconds !== null && <span className="ml-1.5">in {formatCountdown(seconds)}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A sub-tab that has nothing real to show for this phase of the weekend.
+ *
+ * The tab itself stays enabled and reachable — a nav item that greys out is
+ * indistinguishable from one that is broken. What changes is the panel, which
+ * says plainly why it is empty and when it fills up again.
+ */
+function GatedTabPanel({ tab, reason, weekend, onGoToTower }) {
+  const nextStart = reason === 'awaiting_grid'
+    ? weekend?.nextSession?.start ?? null
+    : weekend?.nextSession?.start ?? null
+  const seconds = useCountdownSeconds(nextStart)
+
+  return (
+    <div
+      className="flex-1 overflow-y-auto flex items-start justify-center p-8"
+      data-gated-tab={tab}
+      data-gate-reason={reason ?? 'none'}
+    >
+      <div className="flex flex-col items-center gap-3 text-center max-w-md">
+        <div className="font-mono text-[10px] tracking-widest uppercase" style={{ color: 'var(--pw-ghost)' }}>
+          {tab} · no data this phase
+        </div>
+        <div className="font-mono text-xs leading-relaxed" style={{ color: 'var(--pw-dim)' }}>
+          {disabledTabMessage(reason, { nextSession: weekend?.nextSession })}
+        </div>
+        {seconds !== null && weekend?.nextSession && (
+          <div className="flex flex-col items-center gap-0.5 mt-1">
+            <span className="font-mono text-[9px] tracking-widest uppercase" style={{ color: 'var(--pw-ghost)' }}>
+              {weekend.nextSession.label} in
+            </span>
+            <span className="font-mono text-lg font-bold tabular-nums" style={{ color: 'var(--pw-text-strong)' }}>
+              {formatCountdown(seconds)}
+            </span>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onGoToTower}
+          className="font-display text-[10px] tracking-widest uppercase px-3 py-1.5 border rounded-sm mt-2 transition-colors"
+          style={{ borderColor: 'var(--pw-border)', color: 'var(--pw-dim)' }}
+        >
+          {reason === 'awaiting_grid' ? 'View starting grid' : 'View schedule'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const TABS = LIVE_TABS
 
 // ── Live page ─────────────────────────────────────────────────────────────────
 export default function Live() {
@@ -357,6 +659,14 @@ export default function Live() {
     return () => { cancelled = true; clearInterval(id) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRound])
+
+  // The weekend layer: which GP owns this tab, which phase it is in, which
+  // sub-tabs may render, and what the tower should be showing. Null outside a
+  // weekend window, in which case the page keeps its pre-Phase-E behaviour.
+  const weekend = weekendState.weekend ?? null
+  const towerContent = weekend?.towerContent ?? null
+  const tabs = weekend?.tabs ?? null
+  const gateReason = tabs?.reason ?? null
 
   // `isLive` means timing is still changing. The provisional window also
   // renders the tower but is NOT live, so the two must not be conflated.
@@ -561,14 +871,42 @@ export default function Live() {
 
 
 
-  // A starting grid describes a race that has not happened yet. Once the race
-  // has run — or we are waiting on its official classification — showing one
-  // presents a finished Grand Prix as upcoming.
-  const showStartingGrid = qualifyingGrid.length > 0
+  // Qualifying order is not the grid. Penalties move drivers between the
+  // chequered flag and lights out, and this page sits on that phase for hours,
+  // so the grid is rebuilt from race control every time a message arrives
+  // rather than being rendered once from the qualifying classification.
+  //
+  // An official grid, once the results feed carries one, outranks anything we
+  // derive — see utils/startingGrid.
+  const officialGrid = useMemo(() => {
+    const rows = storeResults[currentRound]?.Results
+    if (!Array.isArray(rows)) return null
+    return rows
+      .filter((r) => r?.grid != null)
+      .map((r) => ({ number: String(r.number), grid: Number(r.grid) }))
+  }, [storeResults, currentRound])
+
+  const startingGrid = useMemo(
+    () => buildStartingGrid({ qualifying: qualifyingGrid, raceControl, officialGrid }),
+    [qualifyingGrid, raceControl, officialGrid],
+  )
+
+  // A starting grid belongs to the grid phase and nowhere else.
+  //
+  // It describes a race that has not happened yet, so it must not appear once
+  // the race has run or while we wait on its classification — that presents a
+  // finished Grand Prix as upcoming. It equally must not appear during a gap
+  // between practice sessions, or before anything has run, where it would be
+  // either premature or last weekend's grid. The weekend layer already answers
+  // "is this the grid phase"; when there is no weekend (out of season) the page
+  // keeps its previous behaviour.
+  const gridIsThePoint = towerContent == null || towerContent === TowerContent.STARTING_GRID
+  const showStartingGrid = startingGrid.rows.length > 0
     && preRaceView === 'GRID'
     && !resultsPending
     && !isRaceStarted
     && session.phase !== 'FINISHED'
+    && gridIsThePoint
 
   const sessionHeaderTitle = isSuspended
     ? 'START PROCEDURE SUSPENDED'
@@ -578,7 +916,12 @@ export default function Live() {
     ? `${session.name ? session.name.toUpperCase() : 'SESSION'} — PROVISIONAL`
     : isSessionActive
     ? (session.name ? session.name.toUpperCase() : 'RACE')
-    : weekendState.currentRace?.raceName ?? 'NO SESSION'
+    // Inside a weekend window the subject is THAT Grand Prix. The legacy layer
+    // advances currentRace to the next one the moment a race finishes, which
+    // titled the Monday-after tower with a race five days away.
+    : weekend?.race?.raceName
+      ?? weekendState.currentRace?.raceName
+      ?? 'NO SESSION'
 
   // Qualifying shows the live segment instead of a lap count — there are no
   // laps to count down in a knockout session.
@@ -602,7 +945,16 @@ export default function Live() {
 
 
   return (
-    <div className="h-full flex flex-col" style={{ background: 'var(--pw-bg)' }}>
+    <div
+      className="h-full flex flex-col"
+      style={{ background: 'var(--pw-bg)' }}
+      /* The resolved weekend phase, surfaced for scripts/verify-weekend-phases
+         to read. Four of the five phases depend on the wall clock and cannot be
+         reached by hand, so the verifier asserts on this rather than guessing
+         the phase from pixels. */
+      data-weekend-state={weekend?.state ?? 'NONE'}
+      data-tower-content={towerContent ?? 'NONE'}
+    >
 
       {/* Sub-tab bar — role=tablist with arrow key navigation */}
       <div
@@ -638,6 +990,14 @@ export default function Live() {
             style={{ color: activeTab === tab ? 'var(--pw-text-strong)' : 'var(--pw-ghost)' }}
           >
             {tab}
+            {tabs && tabs[tab] === false && (
+              <span
+                className="ml-1.5 inline-block w-1 h-1 rounded-full align-middle"
+                style={{ background: 'var(--pw-ghost)', opacity: 0.7 }}
+                title="No data for this phase of the weekend"
+                aria-hidden="true"
+              />
+            )}
           </button>
         ))}
         <div className="ml-auto flex items-center gap-3 px-4">
@@ -708,7 +1068,7 @@ export default function Live() {
                 <span className="font-display font-semibold text-sm tracking-wider uppercase"
                   style={{ color: 'var(--pw-text)' }}>
                   {!isSessionActive && showStartingGrid
-                    ? 'PROVISIONAL STARTING GRID'
+                    ? startingGrid.label
                     : sessionHeaderTitle}
                 </span>
                 {isQualifyingSession && qualiPart != null ? (
@@ -727,7 +1087,7 @@ export default function Live() {
                 ) : null}
               </div>
               <div className="flex items-center gap-2.5">
-                {!isSessionActive && (showStartingGrid || (qualifyingGrid.length > 0 && !resultsPending && !isRaceStarted)) && (
+                {!isSessionActive && gridIsThePoint && (showStartingGrid || (startingGrid.rows.length > 0 && !resultsPending && !isRaceStarted)) && (
                   <div className="flex items-center bg-pitwall-surface-2 p-0.5 rounded border border-pitwall-border">
                     <button
                       onClick={() => setPreRaceView('GRID')}
@@ -735,7 +1095,7 @@ export default function Live() {
                         preRaceView === 'GRID' ? 'bg-pitwall-muted/80 text-pitwall-text-strong font-bold shadow-sm' : 'text-pitwall-ghost hover:text-pitwall-text-strong'
                       }`}
                     >
-                      🏁 GRID ({qualifyingGrid.length})
+                      🏁 GRID ({startingGrid.rows.length})
                     </button>
                     <button
                       onClick={() => setPreRaceView('COUNTDOWN')}
@@ -791,7 +1151,24 @@ export default function Live() {
                 <div className={`flex-1 ${(!isSessionActive && showStartingGrid) ? 'px-0 py-0' : 'px-4 py-2'}`}>
                   {(!isSessionActive || sortedTiming.length === 0) ? (
                     showStartingGrid ? (
-                      <QualifyingGridTower grid={qualifyingGrid} raceInfo={qualiRaceInfo} loading={qualiLoading} />
+                      <QualifyingGridTower
+                        grid={startingGrid.rows}
+                        raceInfo={qualiRaceInfo}
+                        loading={qualiLoading}
+                        source={startingGrid.source}
+                        penaltyCount={startingGrid.penaltyCount}
+                      />
+                    ) : towerContent === TowerContent.SCHEDULE && weekend ? (
+                      <PreWeekendCard weekend={weekend} />
+                    ) : weekend?.state === WeekendState.GAP_IDLE ? (
+                      <GapIdleCard weekend={weekend} />
+                    ) : weekend?.state === WeekendState.POST_WEEKEND ? (
+                      <PostWeekendCard
+                        weekend={weekend}
+                        classification={storeResults[weekend.race?.round]?.Results}
+                        nextRace={weekendState.currentRace}
+                        nextSessionDt={weekendState.nextSession?.targetDt}
+                      />
                     ) : isLive && !qualifyingGrid.length ? (
                       <div>
                         {Array.from({ length: 20 }).map((_, i) => <SkeletonDriverRow key={i} />)}
@@ -963,9 +1340,25 @@ export default function Live() {
       )}
 
       {/* ── OTHER TABS ────────────────────────────────────────────── */}
-      {activeTab === 'STRATEGY'  && <div className="flex-1 overflow-hidden"><StrategyTab /></div>}
-      {activeTab === 'TELEMETRY' && <div className="flex-1 overflow-hidden"><TelemetryTab /></div>}
-      {activeTab === 'RADIO'     && <div className="flex-1 overflow-hidden"><RadioTab /></div>}
+      {/* Strategy, telemetry and radio are session data. Between qualifying and
+          the race — and before FP1 — there is none, and rendering the last
+          session's is the specific failure this gate exists to prevent: it
+          looks live. The nav stays enabled; the panel explains itself. */}
+      {activeTab === 'STRATEGY' && (
+        tabs && !tabs.STRATEGY
+          ? <GatedTabPanel tab="Strategy" reason={gateReason} weekend={weekend} onGoToTower={() => setActiveTab('TOWER')} />
+          : <div className="flex-1 overflow-hidden"><StrategyTab /></div>
+      )}
+      {activeTab === 'TELEMETRY' && (
+        tabs && !tabs.TELEMETRY
+          ? <GatedTabPanel tab="Telemetry" reason={gateReason} weekend={weekend} onGoToTower={() => setActiveTab('TOWER')} />
+          : <div className="flex-1 overflow-hidden"><TelemetryTab /></div>
+      )}
+      {activeTab === 'RADIO' && (
+        tabs && !tabs.RADIO
+          ? <GatedTabPanel tab="Radio" reason={gateReason} weekend={weekend} onGoToTower={() => setActiveTab('TOWER')} />
+          : <div className="flex-1 overflow-hidden"><RadioTab /></div>
+      )}
 
       {/* Live Broadcast Event Banner Ticker */}
       <BroadcastBanner />
