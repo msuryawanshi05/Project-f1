@@ -27,12 +27,12 @@ account system and stores nothing about you.
 
 ## Live demo
 
-Not deployed yet. [Deployment](#deployment) has step-by-step instructions for Vercel and Render
-on their free tiers.
+**[project-f1.antideploy.app](https://project-f1.antideploy.app)**
 
-Worth knowing before you deploy: a hosted instance **cannot stream live timing**, because F1
-blocks cloud hosts. Everything else works. The details, and why the app reports it rather than
-failing silently, are under [Limitations](#limitations).
+Results, standings, drivers, teams, the season calendar and session history are all live there.
+**Live timing is not**, and the site says so in its header: F1 blocks cloud hosts, so no deployed
+instance can stream the feed. Run it locally during a session for that — see
+[Limitations](#limitations).
 
 ---
 
@@ -175,6 +175,25 @@ configuration. Nothing here needs a paid tier.
 teams, the season calendar and session history correctly, but will **not** stream live timing.
 The app detects this and says so in its header rather than appearing broken. If you want live
 timing, run it locally during a session.
+
+### Option A — one service (what the live demo uses)
+
+The backend can serve the built frontend from its own origin, which avoids CORS entirely and
+needs one deployment instead of two. Build the frontend, copy `dist/` to
+`pitwall/backend/static_frontend/`, and deploy the backend; `main.py` picks the directory up if
+it exists and serves the SPA, falling back to `index.html` for client-side routes.
+
+```bash
+cd pitwall/frontend && npm run build
+cp -r dist ../backend/static_frontend
+```
+
+Set `VITE_API_URL` and `VITE_WS_URL` to the deployment's own origin before building, since the
+API and the socket are on the same host.
+
+### Option B — Vercel + Render
+
+Two services, with the frontend on a CDN. `render.yaml` and `frontend/vercel.json` are committed.
 
 ### 1. Backend on Render
 
