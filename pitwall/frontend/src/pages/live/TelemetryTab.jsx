@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import {
   ResponsiveContainer,
   AreaChart, Area,
@@ -8,6 +8,8 @@ import {
 import useF1Store from '../../store/useF1Store'
 import { getTeamColour } from '../../utils/driverUtils'
 import { EmptyState } from '../../components/ui/EmptyState'
+import LapCompare from '../../components/replay/LapCompare'
+import { useReplayTelemetry } from '../../hooks/useReplay'
 
 // ── Shared chart props ────────────────────────────────────────────────────────
 const CHART_MARGIN  = { top: 4, right: 0, bottom: 0, left: 0 }
@@ -159,6 +161,10 @@ function CockpitDashboard({ speed, gear, rpm, throttle, brake, teamColour }) {
   )
 }
 
+// The live store keeps the last 300 car_data frames per driver; the replay
+// window matches it so the charts draw the same amount of history either way.
+const WINDOW = 300
+
 // ── Telemetry Tab ─────────────────────────────────────────────────────────────
 export default function TelemetryTab() {
   const session       = useF1Store((s) => s.session)
@@ -169,13 +175,62 @@ export default function TelemetryTab() {
   const setCmp        = useF1Store((s) => s.setCompareTelemetryDriver)
   const carDataHistory = useF1Store((s) => s.carDataHistory)
 
-  const [compareMode, setCompareMode] = useState(false)
+  const replay = useF1Store((s) => s.replay)
 
-  const selData = useMemo(() => carDataHistory[selDriverNum] ?? [], [carDataHistory, selDriverNum])
-  const cmpData = useMemo(() => 
-    (compareMode && cmpDriverNum) ? (carDataHistory[cmpDriverNum] ?? []) : [], 
-    [carDataHistory, compareMode, cmpDriverNum]
-  )
+  const [compareMode, setCompareMode] = useState(false)
+  // Two ways to compare, and they answer different questions.
+  //
+  // FEED overlays the rolling live telemetry window — what both cars are doing
+  // right now. LAP overlays their fastest laps against distance, which is the
+  // only way to see WHERE one is quicker. The second needs lap boundaries and a
+  // distance channel, neither of which a live feed has, so it exists only in
+  // replay.
+  const [compareAxis, setCompareAxis] = useState('FEED')
+  const lapCompare = replay.active && compareMode && compareAxis === 'LAP'
+
+  // In replay the samples come from the recorded file rather than the socket:
+  // car telemetry is the one stream big enough to matter, so it is fetched per
+  // driver on demand instead of being pushed for all twenty-two cars.
+  const selReplay = useReplayTelemetry(replay.weekend, replay.session,
+    replay.active ? selDriverNum : null)
+  const cmpReplay = useReplayTelemetry(replay.weekend, replay.session,
+    replay.active && compareMode ? cmpDriverNum : null)
+
+  /**
+   * A rolling window of recorded samples ending at the playhead.
+   *
+   * Deliberately the same shape and length as the live window the store
+   * accumulates, so the charts below cannot tell the two apart. That is the
+   * point: replay exercises the live rendering path rather than getting one
+   * of its own.
+   */
+  const windowFrom = useCallback((payload, position) => {
+    if (!payload?.samples?.length) return []
+    const rows = payload.samples
+    // Samples sit on a fixed grid, so finding the playhead is arithmetic
+    // rather than a search.
+    const hz = payload.hz || 2
+    const end = Math.max(1, Math.min(rows.length, Math.round(position * hz) + 1))
+    return rows.slice(Math.max(0, end - WINDOW), end)
+      .map(([t, speed, rpm, gear, throttle, brake, drs]) => ({
+        t, speed, rpm, gear, n_gear: gear, throttle, brake,
+        drs: drs ? 'on' : 'off',
+      }))
+  }, [])
+
+  const selData = useMemo(
+    () => (replay.active
+      ? windowFrom(selReplay.data, replay.position)
+      : carDataHistory[selDriverNum] ?? []),
+    [replay.active, replay.position, selReplay.data, windowFrom, carDataHistory, selDriverNum])
+
+  const cmpData = useMemo(() => {
+    if (!compareMode || !cmpDriverNum) return []
+    return replay.active
+      ? windowFrom(cmpReplay.data, replay.position)
+      : carDataHistory[cmpDriverNum] ?? []
+  }, [replay.active, replay.position, cmpReplay.data, windowFrom, carDataHistory,
+      compareMode, cmpDriverNum])
 
   const selColour = selDriverNum ? getTeamColour(selDriverNum, drivers) : '#888'
   const cmpColour = cmpDriverNum ? getTeamColour(cmpDriverNum, drivers) : '#555'
@@ -199,7 +254,10 @@ export default function TelemetryTab() {
 
   const isLive = session.phase !== 'PRE' && ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE'].includes(session.phase)
 
-  if (!isLive || drivers.length === 0) {
+  // A replay IS a live session as far as this tab is concerned — the same
+  // envelopes arrive on the same socket. What it must not do is claim to be
+  // live, which the REPLAY bar above the tabs handles.
+  if ((!isLive && !replay.active) || drivers.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-200px)] bg-pitwall-bg w-full px-6">
         <EmptyState
@@ -231,6 +289,30 @@ export default function TelemetryTab() {
           >
             {compareMode ? 'COMPARE ON' : 'COMPARE FEED'}
           </button>
+          {compareMode && replay.active && (
+            <div className="flex items-center ml-2 rounded-sm border"
+              style={{ borderColor: 'var(--pw-border)' }}>
+              {['FEED', 'LAP'].map((axis) => (
+                <button
+                  key={axis}
+                  type="button"
+                  onClick={() => setCompareAxis(axis)}
+                  aria-pressed={compareAxis === axis}
+                  title={axis === 'LAP'
+                    ? 'Overlay both drivers\u2019 fastest laps against distance, with a delta trace'
+                    : 'Overlay the rolling live telemetry window'}
+                  className="font-mono text-[10px] px-2 py-1 transition-colors"
+                  style={{
+                    color: compareAxis === axis ? 'var(--pw-text-strong)' : 'var(--pw-ghost)',
+                    background: compareAxis === axis ? 'var(--pw-muted, #2a2a2e)' : 'transparent',
+                    fontWeight: compareAxis === axis ? 700 : 400,
+                  }}
+                >
+                  {axis === 'LAP' ? 'BY DISTANCE' : 'BY FEED'}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-1.5 px-4 py-2">
           {drivers.length === 0 ? (
@@ -259,13 +341,17 @@ export default function TelemetryTab() {
             message={isLive ? 'Select a driver above to initialize live telemetry streams and HUD dials.' : 'Select a driver to view telemetry history.'}
           />
         </div>
-      ) : selData.length === 0 ? (
+      ) : selData.length === 0 && !lapCompare ? (
         <div className="flex-1 flex items-center justify-center bg-carbon px-4">
           <EmptyState
             icon="📭"
             title="No Telemetry Received"
             message="Telemetry stream opened but no active frames received for this driver yet."
           />
+        </div>
+      ) : lapCompare ? (
+        <div className="flex-1 overflow-y-auto">
+          <LapCompare weekend={replay.weekend} session={replay.session} />
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto">

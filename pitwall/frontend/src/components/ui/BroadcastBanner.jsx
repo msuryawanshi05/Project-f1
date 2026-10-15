@@ -5,6 +5,14 @@ import { resolveDriverCode } from '../../utils/driverUtils'
 import { teamColour } from '../../utils/teamColours'
 
 // Shared colour table — this banner had its own stale livery map too.
+/** Seconds, or an already-formatted string, as F1 writes a lap time. */
+function formatLapTime(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return value ?? '—'
+  if (value < 60) return value.toFixed(3)
+  const m = Math.floor(value / 60)
+  return `${m}:${(value - m * 60).toFixed(3).padStart(6, '0')}`
+}
+
 function getTeamColourByName(name) {
   return teamColour(name, { role: 'text' })
 }
@@ -123,7 +131,9 @@ export default function BroadcastBanner() {
         triggerBanner({
           type: 'fastest_lap',
           title: 'FASTEST LAP',
-          message: `${details.code} · ${typeof lapTime === 'number' ? lapTime.toFixed(3) : lapTime}`,
+          // A lap time is written m:ss.sss, not as a count of seconds. The toast
+          // was showing "85.469" beside a panel reading "1:25.469".
+          message: `${details.code} · ${formatLapTime(lapTime)}`,
           accent: '#B468FF', // Purple
           driverDetails: details
         })

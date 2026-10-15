@@ -1,6 +1,7 @@
 import useF1Store from '../../store/useF1Store'
 
 export default function StatusBar() {
+  const replay = useF1Store((s) => s.replay)
   const session     = useF1Store((s) => s.session)
   const trackStatus = useF1Store((s) => s.trackStatus)
   const raceControl = useF1Store((s) => s.raceControl)
@@ -168,9 +169,11 @@ export default function StatusBar() {
 
       {/* Live Indicator */}
       <div className="flex-shrink-0 px-3 border-l border-pitwall-border h-full flex items-center gap-1.5 bg-pitwall-surface-2">
-        <span className={`led-dot ${isLive ? 'red' : 'dim'}`} />
+        {/* A recording is not a feed. Every surface that could be mistaken for
+            one says REPLAY instead, not just the controls. */}
+        <span className={`led-dot ${isLive && !replay.active ? 'red' : 'dim'}`} />
         <span className="font-mono text-[9px] text-pitwall-ghost tracking-widest uppercase">
-          {isLive ? 'LIVE FEED' : 'STANDBY'}
+          {replay.active ? 'REPLAY' : isLive ? 'LIVE FEED' : 'STANDBY'}
         </span>
       </div>
 

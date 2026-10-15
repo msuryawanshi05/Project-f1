@@ -432,3 +432,229 @@ Keyed by year → round number (string). Updated manually each race weekend.
 
 Array of 24 objects. Key fields:
 `round, name, circuit, country, city, lat, lng, timezone, laps, length_km, lap_record, lap_record_holder, lap_record_year, drs_zones, sprint, wikipedia`
+
+---
+
+## 7. Replay Files (`backend/replay/<slug>/`)
+
+Built offline by `scripts/build-replay.py` with FastF1 and committed to the
+repo. The deployed backend reads these files and makes **zero outbound API
+calls** to serve a replay — which is the point, because F1's live timing
+answers 403 to datacenter IP ranges and the public deployment can never show
+live timing (see §5).
+
+Everything is written gzipped and served with `Content-Encoding: gzip`, so the
+backend never decompresses anything; the browser does.
+
+### Directory layout
+
+```
+backend/replay/2026-13-italian/
+  manifest.json            # uncompressed, for reading by eye
+  manifest.json.gz         # what the backend loads
+  race/
+    stream.json.gz         # the event stream - everything except telemetry
+    fastest-laps.json.gz   # every driver's fastest lap on a distance axis
+    telemetry/
+      1.json.gz            # one file per driver, fetched on demand
+      3.json.gz
+      ...
+  qualifying/ fp1/ fp2/ fp3/   # same shape
+```
+
+### Why the split
+
+Two budgets, two treatments. Lap-granularity data — timing, stints, pit stops,
+race control, weather — is a few thousand small records and ships whole. Car
+telemetry is not: at source it is a sample every ~240 ms per car per channel,
+so a 90-minute race across twenty-two cars is tens of millions of numbers. It
+is stored as positional arrays rather than objects (at that volume the repeated
+JSON keys outweigh the numbers they label) and split one file per driver, so
+the Telemetry tab fetches only the two or three drivers a viewer selects.
+
+Measured for the 2026 Italian GP at 4 Hz telemetry:
+
+| Session    | stream   | telemetry | per driver | fastest-laps |
+|------------|----------|-----------|------------|--------------|
+| FP1        | 53.7 KB  | 1.8 MB    | 85.7 KB    | 65.1 KB      |
+| FP2        | 55.1 KB  | 2.0 MB    | 91.9 KB    | 65.0 KB      |
+| FP3        | 47.9 KB  | 1.8 MB    | 82.8 KB    | 65.7 KB      |
+| QUALIFYING | 31.8 KB  | 1.4 MB    | 67.2 KB    | 65.8 KB      |
+| RACE       | 85.8 KB  | 3.1 MB    | 143.4 KB   | 63.1 KB      |
+| **total**  |          |           |            | **10.7 MB**  |
+
+Watching the race tower costs **85.8 KB** — and not even over HTTP: the stream
+is pushed down the WebSocket the page already has open. Telemetry is the only
+thing a viewer downloads, one driver at a time.
+
+Telemetry is recorded at **4 Hz**, which is F1's own CarData rate, so nothing
+is lost. 2 Hz halves the size (6.2 MB total, 79 KB per driver for the race) and
+was the first choice; at 10.7 MB the budget did not require the compromise.
+
+### `manifest.json`
+
+```jsonc
+{
+  "slug": "2026-13-italian",
+  "year": 2026, "round": 13,
+  "name": "Italian Grand Prix",
+  "location": "Monza", "country": "Italy",
+  "event_date": "2026-09-06",
+  "telemetry_hz": 4.0,
+  "sessions": [
+    {
+      "key": "Qualifying",        // Jolpica's schedule key, so a replay session
+                                  // can be matched to the weekend state machine
+      "label": "QUALIFYING",
+      "kind": "qualifying",       // practice | qualifying | race
+      "duration_s": 3842.0,
+      "date_start_utc": "2026-09-05T14:00:00.032000+00:00",
+      "total_laps": null,         // races only
+      "markers": 3,
+      "telemetry_drivers": [1, 3, 5],
+      "has_fastest_laps": true,
+      "bytes": { "stream": 31826, "telemetry": 1507328, "fastest": 67399 }
+    }
+  ]
+}
+```
+
+`date_start_utc` **always carries an offset.** JavaScript parses a date-time
+with no offset as *local* time, so a naive string shifted the replay's virtual
+clock by the viewer's own offset — which fed a wrong `now` into the weekend
+state machine and put the page on the wrong session. Same class of bug as the
+bare `14:00:00` handled in `utils/sessionSchedule.js`.
+
+### `<session>/stream.json.gz`
+
+```jsonc
+{
+  "label": "RACE", "kind": "race",
+  "duration_s": 7101.2,
+  "date_start_utc": "2026-09-06T13:03:30.937000+00:00",
+  "total_laps": 53,
+  "drivers": [ /* the driver_list payload, verbatim */ ],
+  "markers": [ { "t": 199.4, "kind": "sc", "label": "Safety car" } ],
+  "events": [ { "t": 12.34, "type": "timing", "data": { } } ]
+}
+```
+
+`t` is **seconds from the green light**, not from the start of the timing feed.
+FastF1 mixes two clocks — laps, track status, weather and car data carry a
+Timedelta from the feed's start (which begins ~13 minutes before the session),
+while race control messages carry an absolute datetime — and a playhead has to
+be one clock. `Session.session_start_time` and `Session.t0_date` reconcile
+them. Events stamped before the green light are clamped to `t: 0`, so they form
+the starting state rather than being dropped.
+
+**`data` payloads are the exact dicts `signalr_client.clean_*` produces.** The
+replay broadcaster wraps them in the same envelope and pushes them down the
+same WebSocket into the same store. Replay has no rendering path of its own; if
+it did, the two would drift and replay would stop being evidence that the live
+path works.
+
+`event.type` is one of: `timing`, `tyres`, `track_status`, `race_control`,
+`weather`, `lap_count` — the same set `_TOPIC_CLEANERS` emits.
+
+**Events are deltas.** A `timing` event carries only the drivers whose state
+changed, exactly as the real TimingData feed does. `replay_engine._SessionState`
+folds them into the full snapshots the wire format requires — the frontend
+store replaces its timing array outright, so a partial snapshot would blank the
+rest of the field. Seeking re-folds from `t: 0`, which is also the only way
+scrubbing backwards can work: pit counts and tyre ages only go up.
+
+`markers.kind` is `sc`, `vsc`, `red`, `flag`, `pit` or `lead`. They drive the
+scrub bar's ticks and the "next event" jump. Pit and lead markers are race-only
+— a pit entry in qualifying is a car going back to the garage, and marking all
+104 of them would bury the three moments worth jumping to.
+
+### `<session>/telemetry/<driver>.json.gz`
+
+```jsonc
+{
+  "driver_number": 12,
+  "hz": 4.0,
+  "channels": ["t", "speed", "rpm", "gear", "throttle", "brake", "drs"],
+  "samples": [ [0.0, 312, 11450, 7, 100, 0, 1], [0.25, 315, 11600, 7, 100, 0, 1] ]
+}
+```
+
+Samples sit on a fixed grid, so finding the playhead is arithmetic rather than
+a search. Downsampling takes the **nearest** source sample to each grid point,
+not a mean: a mean would invent brake values between 0 and 100 that the car
+never had, and smear gear changes across two gears. `brake` is 0 or 100, `drs`
+is 0 or 1.
+
+### `<session>/fastest-laps.json.gz`
+
+```jsonc
+{
+  "12": {
+    "driver_number": 12, "lap_number": 16,
+    "lap_time": "1:21.846", "lap_time_s": 81.846,
+    "distance": [0.0, 14.5],        // 400 points, 0 .. lap length in metres
+    "speed": [], "throttle": [], "brake": [], "gear": [],
+    "time": []                      // elapsed seconds at each point
+  }
+}
+```
+
+Separate from the time-series telemetry above, and tiny, because a two-driver
+lap comparison is only meaningful against **distance**: compared against time,
+the slower car's trace drifts further behind at every corner and the two stop
+describing the same piece of track.
+
+`time` is normalised so its last value **is** `lap_time_s`. The telemetry
+samples do not begin and end exactly on the timing line — they are a 4 Hz
+stream clipped to the lap — so raw elapsed time runs short by up to a percent.
+Unnormalised, the delta trace between two drivers ended at +0.441 s when the
+two laps were 0.060 s apart, making the one number on the chart a viewer can
+check against the timing screen wrong.
+
+Each driver's lap is on its own distance grid (lap lengths differ by a few
+metres), so `LapCompare.jsx` interpolates the second driver onto the first's
+grid before subtracting. Index-by-index subtraction would compare slightly
+different points of the circuit, and the error grows along the lap.
+
+### Transport (WebSocket commands)
+
+Replay is driven over the **existing** `/ws` socket, not a second endpoint.
+Client to server:
+
+| command | fields | effect |
+|---|---|---|
+| `replay.load` | `weekend`, `session`, `at` | load and seek, paused |
+| `replay.play` / `replay.pause` | — | start/stop the playhead |
+| `replay.speed` | `speed` in {1,2,5,10} | playback rate |
+| `replay.seek` | `at` (seconds) | re-fold and emit the state at that point |
+| `replay.next_event` | — | jump to just before the next marker |
+| `replay.exit` | — | leave replay; the tab returns to the live feed |
+| `replay.status` | — | re-announce |
+
+Server to client adds two envelope types to the existing set: `replay_state`
+(position, speed, playing, `virtual_now`, and on transport changes the
+weekend/session metadata) and `replay_error`.
+
+**State is per connection.** The live broadcaster fans one upstream feed out to
+every client, which is right — there is one race and everyone is watching the
+same moment of it. Replay is the opposite: on a public URL two viewers must not
+fight over the scrubber, so each socket owns its own `ReplaySession` with its
+own playhead, speed and session. Only the recorded data is shared, and it is
+read-only.
+
+Sockets in replay are excluded from the live broadcast (`replay_clients` in
+`main.py`): the live feed's `phase=PRE` session envelope calls
+`resetLiveSession()` in the store, which would wipe a replay mid-playback.
+
+### HTTP endpoints
+
+| route | returns |
+|---|---|
+| `GET /api/replay` | the catalogue; `available: false` when nothing is built |
+| `GET /api/replay/{slug}/{session}/markers` | scrub-bar markers and duration |
+| `GET /api/replay/{slug}/{session}/telemetry/{driver}` | one driver's samples |
+| `GET /api/replay/{slug}/{session}/fastest-laps` | all drivers' fastest laps |
+
+The event stream itself has no HTTP route. It only ever travels down the
+WebSocket, because that is the live path and using anything else would defeat
+the purpose.

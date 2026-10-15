@@ -2,11 +2,13 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import useF1Store from '../../store/useF1Store'
+import { isQualifyingSessionName, qualifyingHeaderLabel } from '../../utils/qualifyingUtils'
 import { getTrackStatus, formatCountdown } from '../../utils/driverUtils'
 import NotificationStack from '../ui/NotificationStack'
 import useNotificationTriggers from '../../hooks/useNotificationTriggers'
 import useRaceWeekendState from '../../hooks/useRaceWeekendState'
 import useLiveStatus from '../../hooks/useLiveStatus'
+import ReplayLauncher from '../replay/ReplayLauncher'
 import DataMonitor from '../dev/DataMonitor'
 import BroadcastBanner from '../ui/BroadcastBanner'
 
@@ -99,11 +101,20 @@ export default function AppShell({ children, wsConnected, connectionState = 'con
   // last value after the flag. Use the resolved lifecycle so a finished session
   // is not advertised as live.
   const { pathname } = useLocation()
+  const replay = useF1Store((s) => s.replay)
+  const qualifying = useF1Store((s) => s.qualifying)
   const liveStatus = useLiveStatus()
   const weekendState = useRaceWeekendState()
   const isLive       = weekendState.isLive === true
   const isProvisional = weekendState.provisional === true
   const ts      = getTrackStatus(trackStatus.status)
+
+  // Qualifying counts segments, not laps. "LAP 62/62" through a knockout
+  // session is the same mistake Phase B fixed in the tower; this is the copy
+  // of it that lives in the global header.
+  const headerDetail = isQualifyingSessionName(session.name)
+    ? qualifyingHeaderLabel(qualifying.part, qualifying.noEntries)
+    : `LAP ${session.lap ?? '—'}/${session.total_laps ?? '—'}`
 
   // Session-aware next session info
   const nextSession = getNextSessionInfo(calendar)
@@ -143,16 +154,16 @@ export default function AppShell({ children, wsConnected, connectionState = 'con
                   : 'bg-amber-500/10 border-amber-500/30'
               }`}
             >
-              <span className={isLive ? 'led-dot red' : 'w-2 h-2 rounded-full bg-amber-400'} aria-hidden="true" />
+              <span className={isLive && !replay.active ? 'led-dot red' : 'w-2 h-2 rounded-full bg-amber-400'} aria-hidden="true" />
               <span
                 className={`font-display text-xs font-bold tracking-widest uppercase ${
-                  isLive ? 'text-status-red' : 'text-amber-700 dark:text-amber-400'
+                  isLive && !replay.active ? 'text-status-red' : 'text-amber-700 dark:text-amber-400'
                 }`}
               >
-                {isLive ? 'LIVE TIMING' : 'PROVISIONAL'}
+                {replay.active ? 'REPLAY' : isLive ? 'LIVE TIMING' : 'PROVISIONAL'}
               </span>
               <span className="font-mono text-xs font-semibold text-pitwall-text-strong tracking-wide">
-                {session.name?.toUpperCase() ?? 'SESSION'} · LAP {session.lap ?? '—'}/{session.total_laps ?? '—'}
+                {session.name?.toUpperCase() ?? 'SESSION'} · {headerDetail}
               </span>
               {ts.severity !== 'green' && (
                 <span className={`text-[10px] font-mono font-bold px-2 py-0.5 animate-pulse ${tsBadgeClass}`}>
@@ -200,13 +211,22 @@ export default function AppShell({ children, wsConnected, connectionState = 'con
           {(() => {
             const feedBlocked = liveStatus.availability === 'unavailable_here'
             const waking = !wsConnected && wsAttempts >= 2
-            const label = wsConnected
+            // A replay outranks every other label here. Reading CONNECTED next
+            // to a tower full of 2026 Monza timing is exactly the confusion
+            // this chip exists to prevent.
+            const label = replay.active
+              ? 'REPLAY'
+              : wsConnected
               ? (feedBlocked ? 'NO FEED' : 'CONNECTED')
               : (waking ? 'WAKING…' : 'CONNECTING…')
-            const dot = wsConnected
+            const dot = replay.active
+              ? 'bg-status-red'
+              : wsConnected
               ? (feedBlocked ? 'bg-status-yellow' : 'bg-status-green')
               : 'bg-pitwall-ghost animate-pulse'
-            const title = wsConnected
+            const title = replay.active
+              ? `Replaying ${replay.weekendName ?? 'a recorded weekend'} — ${replay.sessionLabel ?? ''}. This is not live timing.`
+              : wsConnected
               ? (feedBlocked
                   ? (liveStatus.detail ?? 'Live timing is not available on this deployment.')
                   : 'Connected to the PITWALL backend.')
@@ -281,7 +301,7 @@ export default function AppShell({ children, wsConnected, connectionState = 'con
       {/* Live timing unavailable on this host — stated once, plainly.
           Without it a hosted instance looks broken: the socket is connected and
           nothing ever arrives. Everything else on the site is unaffected. */}
-      {liveStatus.availability === 'unavailable_here' && (
+      {liveStatus.availability === 'unavailable_here' && !replay.active && (
         <div
           role="status"
           className="fixed top-[92px] left-0 right-0 z-30 flex items-center justify-center gap-2 px-4 py-1.5 border-b border-status-yellow/40 bg-status-yellow/10"
@@ -293,6 +313,9 @@ export default function AppShell({ children, wsConnected, connectionState = 'con
             F1's timing feed refuses connections from this server's network. Results, standings,
             drivers, teams and session history all work normally.
           </span>
+          {/* Stating the problem and offering nothing is worse than useless
+              here: replay is the answer to it, and it is one click away. */}
+          <ReplayLauncher compact />
         </div>
       )}
 
@@ -300,7 +323,7 @@ export default function AppShell({ children, wsConnected, connectionState = 'con
       <main
         role="main"
         id="main-content"
-        className={`flex-1 ${liveStatus.availability === 'unavailable_here' ? 'mt-[134px]' : 'mt-[104px]'} mb-7 overflow-auto`}
+        className={`flex-1 ${liveStatus.availability === 'unavailable_here' && !replay.active ? 'mt-[134px]' : 'mt-[104px]'} mb-7 overflow-auto`}
         style={{ background: 'var(--pw-bg)' }}
         tabIndex={-1}
       >

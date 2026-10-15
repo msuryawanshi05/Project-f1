@@ -9,6 +9,11 @@
 # broken — see /api/live-status. Everything served from Jolpica and OpenF1
 # (results, standings, drivers, teams, season, pit timings, speed traps,
 # telemetry history) works normally from a cloud host.
+#
+# The timing tower, strategy, telemetry and radio tabs DO work here, via
+# replay: backend/replay/ holds a full recorded Grand Prix weekend and the
+# server plays it down the same WebSocket the live feed would use. It makes no
+# outbound calls to serve one, so it is unaffected by the 403.
 services:
   - type: web
     name: pitwall-backend

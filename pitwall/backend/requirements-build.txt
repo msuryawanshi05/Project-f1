@@ -1,0 +1,10 @@
+# Dependencies for the offline data-build scripts, not for the server.
+#
+# scripts/build-replay.py turns a real Grand Prix weekend into the replay files
+# committed under backend/replay/. It runs on a developer's machine, never in
+# the deployment.
+#
+#   pip install -r requirements-build.txt
+#   python ../scripts/build-replay.py --round 13 --telemetry-hz 4 --clean
+
+fastf1

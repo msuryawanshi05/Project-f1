@@ -83,7 +83,12 @@ export default function TrackStatusBanner({ statusCode }) {
 
 
   return (
-    <div className={`${config.cls} w-full py-1.5 px-4 flex items-center justify-center gap-2 transition-all duration-300`}>
+    <div
+      role="status"
+      aria-live="polite"
+      data-track-status={statusCode}
+      className={`${config.cls} w-full py-1.5 px-4 flex items-center justify-center gap-2 transition-all duration-300`}
+    >
       <span className="font-display font-bold text-sm tracking-[0.2em] uppercase text-center">
         {config.icon} {bannerLabel}
       </span>

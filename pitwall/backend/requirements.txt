@@ -1,6 +1,12 @@
+# Runtime dependencies for the deployed backend.
+#
+# FastF1 is deliberately NOT here. Nothing at runtime imports it: replay data
+# is built offline by scripts/build-replay.py and committed, so the server
+# reads files rather than calling anything. Installing it would pull pandas and
+# numpy into every deploy for no runtime benefit, and cold starts on a free tier
+# are already the slowest thing about this app. See requirements-build.txt.
 fastapi
 uvicorn[standard]
-fastf1
 websockets
 apscheduler
 python-dotenv

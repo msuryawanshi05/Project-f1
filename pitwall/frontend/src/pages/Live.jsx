@@ -23,6 +23,9 @@ import {
   WeekendState, TowerContent, disabledTabMessage, LIVE_TABS,
 } from '../utils/sessionLifecycle'
 import { buildStartingGrid } from '../utils/startingGrid'
+import ReplayBar from '../components/replay/ReplayBar'
+import ReplayLauncher from '../components/replay/ReplayLauncher'
+import { useReplayCatalogue } from '../hooks/useReplay'
 import QualifyingGridTower from '../components/ui/QualifyingGridTower'
 
 // ── Countdown inline ──────────────────────────────────────────────────────────
@@ -627,6 +630,9 @@ export default function Live() {
   const raceControl = useF1Store((s) => s.raceControl)
   const qualifying  = useF1Store((s) => s.qualifying)
 
+  const replay = useF1Store((s) => s.replay)
+  const replayCatalogue = useReplayCatalogue()
+
   const weekendState = useRaceWeekendState()
   const storeResults = useF1Store((s) => s.results)
   const setResults   = useF1Store((s) => s.setResults)
@@ -672,7 +678,10 @@ export default function Live() {
   // renders the tower but is NOT live, so the two must not be conflated.
   const isLive        = weekendState.isLive === true
   const isProvisional = weekendState.provisional === true
-  const showsTower    = weekendState.mode === 'SESSION_LIVE'
+  // A replay drives the tower through exactly the same envelopes a live
+  // session does, so the tower shows for both. The distinction a viewer needs
+  // is made by the REPLAY bar and the header badge, not by hiding the data.
+  const showsTower    = weekendState.mode === 'SESSION_LIVE' || replay.active
   const resultsPending = weekendState.mode === 'RESULTS_PENDING'
   const currentRound = weekendState.currentRace?.round
   const { grid: qualifyingGrid, raceInfo: qualiRaceInfo, loading: qualiLoading } = useQualifyingGrid(currentRound)
@@ -956,6 +965,10 @@ export default function Live() {
       data-tower-content={towerContent ?? 'NONE'}
     >
 
+      {/* Replay transport. Above the sub-tabs, because a viewer must never be
+          in doubt about whether what they are looking at is live. */}
+      <ReplayBar sessions={replayCatalogue.weekends?.[0]?.sessions ?? []} />
+
       {/* Sub-tab bar — role=tablist with arrow key navigation */}
       <div
         role="tablist"
@@ -1174,7 +1187,14 @@ export default function Live() {
                         {Array.from({ length: 20 }).map((_, i) => <SkeletonDriverRow key={i} />)}
                       </div>
                     ) : (
-                      <TowerEmptyState weekendState={weekendState} />
+                      <div className="flex flex-col items-center justify-center h-full gap-2">
+                        <TowerEmptyState weekendState={weekendState} />
+                        {/* Not an apology for the live feed. On the public
+                            deployment F1 refuses the server's network, so this
+                            is the only way any of these four tabs can show
+                            anything — and it is a real Grand Prix. */}
+                        <ReplayLauncher />
+                      </div>
                     )
                   ) : (
                     sortedTiming.map((t, index) => {

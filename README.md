@@ -1,23 +1,38 @@
 # PITWALL
 
 A Formula 1 timing dashboard for a second screen. It streams live session timing from F1's own
-feed when one is running, and otherwise serves results, standings, driver and constructor
-history from free public APIs.
+feed when one is running, replays a full recorded race weekend when one is not, and serves
+results, standings, driver and constructor history from free public APIs at any time.
+
+**Try it: [project-f1.antideploy.app](https://project-f1.antideploy.app)** — open the Live tab
+and press play on the 2026 Italian Grand Prix.
 
 ![PITWALL walkthrough](./assets/pitwall-demo.gif)
 
-<sub>Recorded with [`pitwall/scripts/record-demo.mjs`](pitwall/scripts/record-demo.mjs) against a
-fixed seeded race state, so it is reproducible out of season. The timing values in the GIF are
-synthetic; everything the deployed app shows is real.</sub>
+<sub>Recorded with [`pitwall/scripts/record-demo.mjs`](pitwall/scripts/record-demo.mjs) from the
+bundled replay of the 2026 Italian Grand Prix. Every number in it is real timing data; the
+recording is reproducible because the race is on disk, not because the data is invented.</sub>
 
 ---
 
 ## What it does
 
+**Replay a real Grand Prix, any time** — a full recorded weekend of the 2026 Italian GP at
+Monza, all five sessions, played back through the same WebSocket and the same components the
+live feed uses. Play, pause, 1x to 10x, scrub anywhere, or jump to the next pit stop, safety car
+or lead change. Every tab works exactly as it does during a session, because the data arrives
+exactly the same way. [More below](#replay).
+
 **Live, during a session** — timing tower with gap and interval, sector times with F1's
 purple/green/yellow colouring, mini-sector detail, tyre compound and age, pit stop counts, speed
 traps, and a qualifying mode that switches to best-lap order with the correct knockout line.
 Track map, weather, race control messages, and a telemetry tab with speed/throttle/brake/gear.
+
+**Through a race weekend** — the Live tab knows which phase of the weekend it is in. Before FP1
+it shows the running order and a countdown; between sessions, the last session's results; after
+qualifying, the starting grid with penalties applied from race control, and the strategy,
+telemetry and radio tabs explicitly empty rather than showing hours-old qualifying data dressed
+as live.
 
 **Any time** — race results, championship standings, driver and constructor career records with
 head-to-head comparison, the season calendar with circuit detail, and session history.
@@ -29,10 +44,55 @@ account system and stores nothing about you.
 
 **[project-f1.antideploy.app](https://project-f1.antideploy.app)**
 
-Results, standings, drivers, teams, the season calendar and session history are all live there.
-**Live timing is not**, and the site says so in its header: F1 blocks cloud hosts, so no deployed
-instance can stream the feed. Run it locally during a session for that — see
+Everything works there, including the timing tower, strategy, telemetry and radio — via replay.
+F1 blocks cloud hosts from its live feed (403 to datacenter IP ranges), so no deployed instance
+anywhere can stream a live session; the site says so in its header rather than looking broken.
+Replay is the answer to that, not a consolation for it: open the Live tab, press play, and the
+2026 Italian Grand Prix runs through the real dashboard.
+
+For genuine live timing during a session, run it on your own machine — see
 [Limitations](#limitations).
+
+---
+
+## Replay
+
+A completed Grand Prix weekend, committed to the repo and played back on a virtual clock.
+
+**The weekend is the 2026 Italian GP at Monza**, picked on merit rather than convenience. It has
+a safety car, a red flag and a virtual safety car in one race — so the track-status banner has to
+tell three different things apart — four grid penalties for the starting-grid logic to apply,
+four distinct tyre strategies in the top ten, an Alpine on pole, and Antonelli winning from
+nineteenth on the grid.
+
+**It drives the live path, not a parallel one.** The recorded events are the exact payloads F1's
+SignalR cleaners produce; the replay broadcaster wraps them in the same envelope and pushes them
+down the same WebSocket into the same store. If replay rendered through its own path the two
+would drift, and replay would stop being evidence that the live path works.
+
+| | |
+|---|---|
+| **Transport** | play / pause, 1x 2x 5x 10x, scrub to any point, jump to the next pit stop, safety car or lead change |
+| **Scrubbing** | reconstructs full state at that moment — tyre age, stint, pit counts, gaps, lap count, flags shown so far — by re-folding the stream, not by replaying from the start |
+| **Concurrency** | every connection has its own playhead. Two people on the public URL do not share a scrubber |
+| **Weekend state** | the virtual clock feeds the weekend state machine, so playing through walks pre-weekend → live → results → the grid phase → post-race for real |
+| **Telemetry** | 4 Hz, F1's own CarData rate. Fetched per driver on demand, so selecting two cars costs ~290 KB rather than shipping all twenty-two |
+| **Lap compare** | two drivers' fastest laps overlaid on a common distance axis with a delta trace — only possible with recorded laps, since a live feed has no lap boundaries |
+
+**Size.** 10.7 MB committed for all five sessions. Watching the race tower costs **86 KB**, and
+not even over HTTP — the event stream is pushed down the socket the page already has open.
+Per-session and per-stream figures are in
+[`pitwall/backend/data_shapes.md`](pitwall/backend/data_shapes.md) §7, along with the file format.
+
+**Rebuilding it** (needs FastF1; run locally, never at runtime):
+
+```bash
+cd pitwall
+python scripts/build-replay.py --round 13 --telemetry-hz 4 --clean
+```
+
+The deployed backend reads the committed files and makes zero outbound API calls to serve a
+replay.
 
 ---
 
@@ -48,6 +108,7 @@ Everything is free and unauthenticated. There are no API keys in this project.
 | **Open-Meteo** `api.open-meteo.com` | Circuit weather forecast | none | Used on the season/circuit panels. |
 | **Wikipedia REST** | Circuit summaries | none | Proxied by the backend, which sets the required `User-Agent`. |
 | **Formula 1 media CDN** | Team logos, driver headshots | none | Images only, served directly to the browser. |
+| **FastF1** (offline only) | The committed replay weekend | none | Run locally by `scripts/build-replay.py`. Never called at runtime. |
 
 Circuit geometry comes from [`bacinger/f1-circuits`](https://github.com/bacinger/f1-circuits)
 (OpenStreetMap-traced GeoJSON), vendored in `pitwall/frontend/public/trackmaps/`.
@@ -68,15 +129,24 @@ Circuit geometry comes from [`bacinger/f1-circuits`](https://github.com/bacinger
                     │  signalr_client.py  parse + normalise    │
                     │        │                                 │
                     │        ▼                                 │
-                    │  asyncio.Queue ──► broadcaster           │
-                    │        │                                 │
-                    │        ├──► SQLite session cache (3 h)   │
-                    │        └──► every connected browser      │
+                    │  asyncio.Queue ──► broadcaster ──┐       │
+                    │        │                         │       │
+                    │        └──► SQLite cache (3 h)   │       │
+                    │                                  │       │
+                    │  replay_engine.py                │       │
+                    │    backend/replay/*.json.gz      │       │
+                    │        │                         │       │
+                    │        ▼                         │       │
+                    │  per-connection playhead ────────┤       │
+                    │    identical envelopes           │       │
+                    │                                  ▼       │
+                    │                        every browser     │
                     │                                          │
                     │  /api/driver|constructor/{id}/career     │
                     │        └─► Jolpica, paced + cached 24 h  │
-                    │  /api/openf1/*   transparent proxy       │
+                    │  /api/openf1/*     transparent proxy     │
                     │  /api/live-status  is the feed usable?   │
+                    │  /api/replay/*     catalogue + telemetry │
                     └────────────────────┬─────────────────────┘
                                          │  WebSocket + REST
                     ┌────────────────────▼─────────────────────┐
@@ -94,8 +164,13 @@ Circuit geometry comes from [`bacinger/f1-circuits`](https://github.com/bacinger
                       └────────────────────────────────────────┘
 ```
 
-The two paths are independent on purpose: the live feed going away degrades the Live tab and
-nothing else.
+The two outer paths are independent on purpose: the live feed going away degrades the Live tab
+and nothing else.
+
+Replay joins at the broadcaster rather than beside it. It emits the same envelope types the
+SignalR cleaners emit, over the same `/ws` socket, into the same store — the only difference is
+that its playhead belongs to one connection instead of being shared by all of them. That is what
+makes a replay a working test of the live path rather than a mock of it.
 
 ---
 
@@ -123,30 +198,61 @@ npm run dev
 No configuration is needed for local use. `backend/.env` can override `HOST`, `PORT` and
 `CORS_ORIGINS`; the defaults already allow both `localhost` and `127.0.0.1` on the dev ports.
 
+The replay plays straight away — its data is in the repo. `requirements.txt` is runtime only;
+FastF1 lives in `requirements-build.txt` and is needed only to rebuild that data, because
+nothing at runtime imports it and installing pandas into every deploy for a script that never
+runs there is a slow cold start for nothing.
+
 ### Tests
 
 ```bash
-cd pitwall/backend && python test_clean_timing.py && python test_payload_parsing.py && python test_live_status.py
-cd ../frontend && for t in sessionLifecycle qualifyingUtils teamColours trackStatus; do node src/utils/$t.test.mjs; done
+cd pitwall/backend
+python test_clean_timing.py && python test_payload_parsing.py && python test_live_status.py
+python -m pytest test_replay_engine.py -q
+
+cd ../frontend
+for t in sessionLifecycle qualifyingUtils teamColours trackStatus weekendState startingGrid; do
+  node src/utils/$t.test.mjs
+done
 ```
 
 They cover the parts where being wrong is invisible: F1's mini-sector colour codes, the
-qualifying knockout maths, session lifecycle transitions, contrast ratios, and the track status
-banner.
+qualifying knockout maths, session and weekend state transitions, grid-penalty arithmetic,
+contrast ratios, the track status banner, and the replay engine's state reconstruction.
+
+Two browser checks drive the real UI and assert on what it renders. Both need the dev server,
+and the replay one needs the backend too:
+
+```bash
+cd pitwall/frontend
+node ../scripts/verify-weekend-phases.mjs   # the weekend state machine, clock frozen at ten points
+node ../scripts/verify-replay.mjs           # the replay, end to end, against the real Monza data
+```
+
+`verify-replay.mjs` plays the race, confirms the tower updates and a pit stop reaches the
+strategy log, checks the safety car banner says SAFETY CAR and the red flag says RED FLAG,
+scrubs to three points and compares the reconstructed order against the actual classification,
+opens two connections at different playheads, and walks the full weekend asserting each phase
+transition. Screenshots land in `pitwall/scripts/out/`.
 
 ---
 
 ## Limitations
 
 **Live timing only exists during a session.** F1 publishes the feed from roughly five minutes
-before a session until shortly after it ends. Outside that window the Live tab shows a countdown
-to the next session, and the tower is empty — that is the feed being absent, not a fault.
+before a session until shortly after it ends. Outside that window the Live tab offers the replay
+and a countdown to the next session; the tower being empty is the feed being absent, not a fault.
 
 **F1's live timing refuses connections from most cloud hosts.** `livetiming.formula1.com` returns
 403 to VPS, CI and serverless IP ranges; it generally only answers residential connections. A
 deployed instance therefore cannot stream live timing, and the app says so in the UI rather than
 appearing broken ([`/api/live-status`](pitwall/backend/main.py)). Running it on your own machine
-during a session works. Everything served by Jolpica and OpenF1 is unaffected.
+during a session works, and [replay](#replay) covers the same ground anywhere. Everything served
+by Jolpica and OpenF1 is unaffected.
+
+**Replay has no team radio audio.** OpenF1 publishes radio clips only during and shortly after a
+live session, so they are not part of a recorded weekend. The Radio tab says so and still shows
+the session's real race control messages.
 
 **Results lag the chequered flag.** Official classification appears on Jolpica minutes to hours
 after a race. In between, the app shows the retained timing state as a provisional classification

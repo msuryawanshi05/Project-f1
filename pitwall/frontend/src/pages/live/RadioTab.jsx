@@ -249,6 +249,8 @@ export default function RadioTab() {
 
   // Only a RECENT start-procedure message means the session is starting.
   // An unbounded scan kept this panel "live" long after the chequered flag.
+  const replay = useF1Store((s) => s.replay)
+
   const RC_FRESH_MS = 10 * 60 * 1000
   const isFormationLap = session.phase !== 'FINISHED' && raceControl.some((m) => {
     const ts = m.time ? Date.parse(m.time) : NaN
@@ -257,8 +259,9 @@ export default function RadioTab() {
     return txt.includes('FORMATION LAP') || txt.includes('START PROCEDURE')
   })
 
-  const isLive = isFormationLap || (session.phase !== 'PRE' && session.phase !== 'FINISHED'
-    && ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase))
+  const isLive = replay.active || isFormationLap
+    || (session.phase !== 'PRE' && session.phase !== 'FINISHED'
+        && ['LIVE', 'RACE', 'QUALIFYING', 'PRACTICE', 'FORMATION'].includes(session.phase))
 
   // Never pre-populate with past race clips — always start empty
   const [radioClips, setRadioClips] = useState([])
@@ -381,8 +384,10 @@ export default function RadioTab() {
             <div className="flex flex-col items-center justify-center h-full bg-carbon px-4">
               <EmptyState
                 icon="📻"
-                title="Awaiting Transmissions"
-                message="Connected to the team radio feed. Clips appear here as they are published — only genuine recordings are ever shown."
+                title={replay.active ? 'No audio in this replay' : 'Awaiting Transmissions'}
+                message={replay.active
+                  ? 'Team radio clips are published by OpenF1 only during and shortly after a live session, so they are not part of a recorded weekend. Race control messages below are from the real session.'
+                  : 'Connected to the team radio feed. Clips appear here as they are published — only genuine recordings are ever shown.'}
               />
             </div>
           ) : (

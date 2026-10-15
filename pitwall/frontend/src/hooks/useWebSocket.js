@@ -69,6 +69,8 @@ export function useWebSocket() {
     updateBestLap,
     updateGapHistory,
     resetLiveSession,
+    setReplay,
+    setSendCommand,
   } = useF1Store()
 
   // ── Race-control freshness ───────────────────────────────────────────────────
@@ -243,6 +245,38 @@ function hasRecentStartProcedure(messages) {
         })
         break
       }
+      case 'replay_state': {
+        // The backend sends a light update four times a second while playing
+        // (position only) and a full one on every transport change, so this
+        // merges rather than replaces.
+        const patch = {
+          active: data.active,
+          position: data.position ?? 0,
+          duration: data.duration ?? useF1Store.getState().replay.duration,
+          speed: data.speed ?? useF1Store.getState().replay.speed,
+          playing: Boolean(data.playing),
+          virtualNow: data.virtual_now ?? null,
+        }
+        if ('weekend' in data) patch.weekend = data.weekend
+        if ('weekend_name' in data) patch.weekendName = data.weekend_name
+        if ('event_date' in data) patch.eventDate = data.event_date
+        if ('session' in data) patch.session = data.session
+        if ('session_label' in data) patch.sessionLabel = data.session_label
+        if ('kind' in data) patch.kind = data.kind
+        if ('total_laps' in data) patch.totalLaps = data.total_laps
+        // Leaving replay returns the tab to whatever the live feed is doing, so
+        // the retained timing from the replay must go with it.
+        if (data.active === false) resetLiveSession()
+        setReplay(patch)
+        break
+      }
+      case 'replay_error':
+        setReplay({ active: false })
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[replay]', data?.message)
+        }
+        break
       default:
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
@@ -292,6 +326,13 @@ function hasRecentStartProcedure(messages) {
       }
       // Fetch current session key after connecting
       fetchCurrentSession()
+      // Replay commands ride this socket. Publishing the sender here rather
+      // than opening a second connection is what keeps replay on the live path.
+      setSendCommand((cmd) => {
+        try {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd))
+        } catch { /* socket closed between check and send */ }
+      })
     }
 
     ws.onmessage = (event) => {

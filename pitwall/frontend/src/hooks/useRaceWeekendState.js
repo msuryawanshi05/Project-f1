@@ -86,6 +86,7 @@ function buildWeekendView(calendar, now, { liveSessionKey = null, actualEnds = {
 }
 
 export default function useRaceWeekendState() {
+  const replayNow   = useF1Store((s) => (s.replay.active ? s.replay.virtualNow : null))
   const session     = useF1Store((s) => s.session)
   const calendar    = useF1Store((s) => s.calendar)
   const raceControl = useF1Store((s) => s.raceControl)
@@ -94,7 +95,16 @@ export default function useRaceWeekendState() {
   const results     = useF1Store((s) => s.results)
 
   return useMemo(() => {
-    const now = new Date()
+    // The clock is injected, not branched on.
+    //
+    // Everything below — and every function in utils/sessionLifecycle — takes
+    // `now` as a value. During a replay that value is the instant the playhead
+    // sits at, so playing through the recorded weekend walks the real state
+    // machine: PRE_WEEKEND before FP1, SESSION_LIVE during a session,
+    // SESSION_RESULTS and GAP_IDLE between them, POST_WEEKEND after the race.
+    // No lifecycle code knows replay exists, which is the only way replay can
+    // be evidence that the live behaviour is right.
+    const now = replayNow ? new Date(replayNow) : new Date()
 
     // The feed knows which session is actually running; the schedule only
     // knows which one is scheduled. A delayed or red-flagged session is still
@@ -393,5 +403,8 @@ export default function useRaceWeekendState() {
     // (isLivePhase / isFormation), so they must be listed. Without them the
     // mode never flipped to SESSION_LIVE when timing started arriving without
     // an accompanying phase change.
-  }, [session.phase, session.lap, calendar, raceControl, timing, sessionMeta, results])
+  // replayNow is in the dependency list because it IS the clock: without it
+  // the memo would hold the first instant of a replay for its whole duration.
+  }, [session.phase, session.lap, session.name, calendar, raceControl, timing,
+      sessionMeta, results, replayNow])
 }

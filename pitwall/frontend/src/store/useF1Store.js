@@ -45,6 +45,31 @@ const useF1Store = create((set, get) => ({
   carData: {},        // { [driverNumber]: { speed, rpm, gear, throttle, brake, drs } }
   carDataHistory: {}, // { [driverNumber]: [{ speed, rpm, gear, throttle, brake, drs, ... }] }
 
+  // ── Replay ────────────────────────────────────────────────────────────────
+  // Where the replay playhead is, mirrored from the backend's replay_state
+  // envelopes. `virtualNow` is the real instant the playhead sits at, and it is
+  // what the weekend state machine uses as `now` while a replay is running —
+  // which is how playing through a weekend walks PRE_WEEKEND to POST_WEEKEND
+  // without a line of replay-aware code in the lifecycle.
+  replay: {
+    active: false,
+    weekend: null,
+    weekendName: null,
+    eventDate: null,
+    session: null,
+    sessionLabel: null,
+    kind: null,
+    position: 0,
+    duration: 0,
+    speed: 1,
+    playing: false,
+    virtualNow: null,
+    totalLaps: null,
+  },
+  // Set by useWebSocket once the socket is open. Components call it rather than
+  // holding a socket reference of their own.
+  sendCommand: null,
+
   // ── Strategy chart gap history ──────────────────────────────────────────────
   gapHistory: [],     // [{ lap, gap_<number>: seconds, ... }] — last 100 laps
   // ── Telemetry driver selection ──────────────────────────────────────────────
@@ -116,6 +141,11 @@ const useF1Store = create((set, get) => ({
   setDrivers: (drivers) => set({ drivers }),
 
   setTiming: (timing) => set({ timing }),
+
+  setReplay: (patch) =>
+    set((state) => ({ replay: { ...state.replay, ...patch } })),
+
+  setSendCommand: (fn) => set({ sendCommand: fn }),
 
   setTyres: (tyres) => set({ tyres }),
 

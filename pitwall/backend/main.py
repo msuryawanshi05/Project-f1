@@ -21,8 +21,12 @@ from datetime import date, datetime, timedelta, timezone
 import requests as req_sync
 
 import httpx
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
+
+from replay_engine import ReplayLibrary, ReplaySession, handle_command
 
 from db import (api_cache_get, api_cache_set, cache_get_all,
                 cache_prune_expired, cache_set, init_db)
@@ -42,6 +46,16 @@ message_queue: asyncio.Queue = asyncio.Queue()
 connected_clients: set[WebSocket] = set()
 _background_tasks: set[asyncio.Task] = set()   # prevent GC of running tasks
 
+# Recorded weekends, read once and shared read-only. Playheads are per
+# connection and live on the ReplaySession each socket owns — see replay_engine.
+replay_library = ReplayLibrary()
+
+# Sockets currently playing a replay. The live broadcaster skips them: it emits
+# the real session state, and between weekends that state is phase=PRE, which
+# the store treats as "session over" and resets on — wiping a replay in
+# progress. Replay frames reach these sockets from their own ReplaySession.
+replay_clients: set[WebSocket] = set()
+
 
 # ── Broadcaster coroutine — runs for the lifetime of the app ─────────────────
 async def broadcaster():
@@ -59,11 +73,13 @@ async def broadcaster():
         if msg_type != "car_data":
             await cache_set(msg_type, envelope)
 
-        # Broadcast
+        # Broadcast to every client that is not watching a replay. A replay
+        # viewer receiving the live feed's phase=PRE session envelope would
+        # have their replay reset out from under them by the store.
         if connected_clients:
             payload = json.dumps(envelope)
             dead: set[WebSocket] = set()
-            for ws in list(connected_clients):
+            for ws in list(connected_clients - replay_clients):
                 try:
                     await ws.send_text(payload)
                 except Exception:  # noqa: BLE001
@@ -801,6 +817,79 @@ async def constructor_career(constructor_id: str):
     return payload
 
 
+@app.get("/api/replay")
+async def replay_index():
+    """
+    What recorded weekends this deployment can play.
+
+    The frontend asks before offering replay at all, so a deployment built
+    without the data simply does not show the feature rather than offering a
+    button that fails.
+    """
+    weekends = replay_library.weekends()
+    return {"available": bool(weekends), "weekends": weekends}
+
+
+@app.get("/api/replay/{slug}/{session}/telemetry/{driver}")
+async def replay_telemetry(slug: str, session: str, driver: str):
+    """
+    One driver's car telemetry for one session.
+
+    Split per driver and fetched on demand because this is the one expensive
+    stream: shipping all twenty-two up front would be about a megabyte a
+    session for data a viewer looks at two cars of. The files are stored
+    gzipped and served as-is, so nothing is decompressed here.
+    """
+    return _serve_replay_asset(slug, session.lower(), "telemetry", f"{driver}.json.gz")
+
+
+@app.get("/api/replay/{slug}/{session}/markers")
+async def replay_markers(slug: str, session: str):
+    """
+    The points worth putting on a scrub bar: pit stops, safety cars, flags,
+    lead changes.
+
+    Served separately from the stream because the client has no business
+    downloading 2,400 timing events to draw a dozen ticks.
+    """
+    try:
+        stream = replay_library.stream(slug, session)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid replay path")
+    if stream is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {
+        "markers": stream.get("markers", []),
+        "duration": stream.get("duration_s"),
+        "label": stream.get("label"),
+    }
+
+
+@app.get("/api/replay/{slug}/{session}/fastest-laps")
+async def replay_fastest_laps(slug: str, session: str):
+    """Every driver's fastest lap on a common distance axis, for compare mode."""
+    return _serve_replay_asset(slug, session.lower(), "fastest-laps.json.gz")
+
+
+def _serve_replay_asset(slug: str, *parts: str) -> Response:
+    try:
+        path = replay_library.asset(slug, *parts)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid replay path")
+    if path is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    # Stored gzipped and handed over as gzip: the browser inflates it, this
+    # process never does.
+    return Response(
+        content=path.read_bytes(),
+        media_type="application/json",
+        headers={
+            "Content-Encoding": "gzip",
+            "Cache-Control": "public, max-age=31536000, immutable",
+        },
+    )
+
+
 @app.get("/api/live-status")
 async def live_status():
     """
@@ -854,6 +943,17 @@ async def websocket_endpoint(ws: WebSocket):
     client_host = ws.client.host if ws.client else "unknown"
     logger.info("WS connected: %s (total: %d)", client_host, len(connected_clients))
 
+    # Replay runs over THIS socket, not a second one.
+    #
+    # The point of replay is to prove the live path works, so it has to use the
+    # live path: same envelopes, same socket, same store, same components. A
+    # dedicated /ws/replay endpoint would have been easier and would have given
+    # the frontend two ways to receive timing, which is how the two drift.
+    #
+    # The playhead is per connection, because on a public URL two viewers must
+    # not share one scrubber.
+    replay = ReplaySession(replay_library, lambda env: ws.send_text(json.dumps(env)))
+
     try:
         # Send all currently valid cached data so a fresh page load has latest telemetry
         cached = await cache_get_all()
@@ -883,13 +983,27 @@ async def websocket_endpoint(ws: WebSocket):
                 "data": {"drivers": []},
             }))
 
-        # Keep connection alive — wait for client messages (pong etc.)
+        # Keep the connection alive, and carry replay commands.
         while True:
             try:
-                await asyncio.wait_for(ws.receive_text(), timeout=30)
+                raw = await asyncio.wait_for(ws.receive_text(), timeout=30)
             except asyncio.TimeoutError:
                 # Send a ping to check if client is still alive
                 await ws.send_text(json.dumps({"type": "ping"}))
+                continue
+
+            # Anything that is not JSON is a pong or a keepalive; ignore it
+            # rather than letting a malformed frame close the socket.
+            try:
+                msg = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(msg, dict):
+                if await handle_command(replay, msg):
+                    if replay.stream is not None:
+                        replay_clients.add(ws)
+                    else:
+                        replay_clients.discard(ws)
 
     except WebSocketDisconnect:
         logger.info("WS disconnected: %s", client_host)
@@ -897,6 +1011,8 @@ async def websocket_endpoint(ws: WebSocket):
         logger.exception("WS error for %s", client_host)
     finally:
         connected_clients.discard(ws)
+        replay_clients.discard(ws)
+        await replay.stop()
 
 
 @app.get("/api/circuit-info/{article}")
