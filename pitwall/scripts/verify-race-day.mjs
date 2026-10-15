@@ -47,10 +47,14 @@ async function open(browser, { dark = true } = {}) {
   await ctx.addInitScript((d) => {
     try {
       sessionStorage.setItem('pitwall_booted', '1')
-      localStorage.setItem('pitwall_settings', JSON.stringify({
-        darkMode: d, soundEnabled: false, syncDelaySeconds: 0,
-        favouriteDrivers: ['12', '63'],      // ANT and RUS, who finished 1-2
-      }))
+      // Seed once. This runs on every navigation, so writing unconditionally
+      // would reset the very setting a persistence test just changed.
+      if (!localStorage.getItem('pitwall_settings')) {
+        localStorage.setItem('pitwall_settings', JSON.stringify({
+          darkMode: d, soundEnabled: false, syncDelaySeconds: 0,
+          favouriteDrivers: ['12', '63'],    // ANT and RUS, who finished 1-2
+        }))
+      }
     } catch { /* storage blocked */ }
   }, dark)
   const page = await ctx.newPage()
@@ -75,12 +79,40 @@ async function startRace(page) {
   await wait(400)
 }
 
-/** Drag the scrub bar to a fraction of the session. */
+/**
+ * Move the scrub bar to a fraction of the session, and confirm it got there.
+ *
+ * A single click does not always register, and the assertion that followed
+ * then quietly tested the previous position instead — which is how a
+ * suppression check passed while the playhead was still under the VSC.
+ */
 async function scrubTo(page, fraction) {
   const bar = page.getByRole('slider', { name: 'Replay position' })
-  const box = await bar.boundingBox()
-  await page.mouse.click(box.x + box.width * fraction, box.y + box.height / 2)
-  await wait(1600)
+  const target = Number(await bar.getAttribute('aria-valuemax')) * fraction
+  const landed = async () => {
+    const now = Number(await bar.getAttribute('aria-valuenow'))
+    return Math.abs(now - target) < Math.max(30, target * 0.03) ? now : null
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const box = await bar.boundingBox()
+    await page.mouse.click(box.x + box.width * fraction, box.y + box.height / 2)
+    await wait(1400)
+    const now = await landed()
+    if (now != null) return now
+  }
+  // A real mouse click occasionally misses after the panel re-renders mid-race.
+  // The handler reads clientX, so dispatching on the element itself exercises
+  // the same code without depending on hit-testing.
+  await bar.evaluate((el, f) => {
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('click', {
+      bubbles: true, clientX: r.left + r.width * f, clientY: r.top + r.height / 2,
+    }))
+  }, fraction)
+  await wait(1400)
+  const now = await landed()
+  if (now == null) throw new Error(`scrub did not reach ${Math.round(target)}s`)
+  return now
 }
 
 async function panelText(page, heading) {

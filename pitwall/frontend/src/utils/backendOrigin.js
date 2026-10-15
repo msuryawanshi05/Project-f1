@@ -15,6 +15,12 @@
  * Firefox and Safari have not shipped PNA and treat loopback differently
  * again. None of that is under this app's control.
  *
+ * MEASURED 2026-10-15, Chrome 1xx, from https://project-f1.antideploy.app to a
+ * backend confirmed up on loopback (curl got 200): BOTH a fetch and a
+ * WebSocket hang indefinitely. No error event, no close event, nothing after
+ * four seconds. Chrome blocks it and says nothing — which is exactly why the
+ * timeout below is not optional. Firefox untested.
+ *
  * So the rule is: try, fail fast, say exactly what happened, and fall back.
  * The one unacceptable outcome is a page that hangs on a connection that will
  * never open — which is what happens by default, because a blocked WebSocket

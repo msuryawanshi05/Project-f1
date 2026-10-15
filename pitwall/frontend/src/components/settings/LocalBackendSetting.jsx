@@ -41,6 +41,16 @@ export default function LocalBackendSetting() {
           <div className="font-mono text-[10px] text-pitwall-ghost mt-1.5">
             Start it with <code>pitwall\race-day.ps1</code>, then turn this on.
           </div>
+          <div className="font-mono text-[10px] mt-1.5 leading-relaxed text-status-yellow">
+            Measured 15 Oct 2026: Chrome blocks this. A request from this https page
+            to localhost is not refused — it simply never completes, so the toggle
+            waits 2.5s and falls back. Do not rely on it during a session.
+          </div>
+          <div className="font-mono text-[10px] text-pitwall-ghost mt-1.5">
+            What does work: run <code>race-day.ps1</code> and open{' '}
+            <strong>http://localhost:8000</strong> directly — same app, live timing,
+            no cross-origin rules to satisfy.
+          </div>
         </div>
 
         <button

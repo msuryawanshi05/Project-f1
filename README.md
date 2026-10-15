@@ -283,6 +283,15 @@ appearing broken ([`/api/live-status`](pitwall/backend/main.py)). Running it on 
 during a session works, and [replay](#replay) covers the same ground anywhere. Everything served
 by Jolpica and OpenF1 is unaffected.
 
+**Pointing the deployed site at a local backend does not work in Chrome.**
+There is a toggle for it in Settings, because a backend on your own machine is
+the only one that can reach F1's feed. Measured 15 Oct 2026 from the deployed
+https page against a local backend confirmed up: Chrome blocks both the fetch
+and the WebSocket, and does so by never completing rather than by failing — so
+the toggle times out after 2.5s and falls back to the deployed backend. Use
+`race-day.ps1` and open `http://localhost:8000` directly instead. Firefox
+untested.
+
 **Replay has no team radio audio.** OpenF1 publishes radio clips only during and shortly after a
 live session, so they are not part of a recorded weekend. The Radio tab says so and still shows
 the session's real race control messages.
