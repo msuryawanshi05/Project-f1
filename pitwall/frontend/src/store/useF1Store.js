@@ -65,6 +65,7 @@ const useF1Store = create((set, get) => ({
     playing: false,
     virtualNow: null,
     totalLaps: null,
+    firstTiming: 0,
   },
   // Set by useWebSocket once the socket is open. Components call it rather than
   // holding a socket reference of their own.

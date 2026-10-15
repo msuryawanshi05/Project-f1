@@ -1186,6 +1186,24 @@ export default function Live() {
                       <div>
                         {Array.from({ length: 20 }).map((_, i) => <SkeletonDriverRow key={i} />)}
                       </div>
+                    ) : replay.active ? (
+                      /* A replay before the first car crosses the line is not
+                         "no session active" — the session is very much on, it
+                         is lap one. Saying the wrong thing here is the same
+                         mistake as showing stale timing, in the other
+                         direction. */
+                      <div className="flex flex-col items-center justify-center h-full gap-3 p-8 text-center">
+                        <span className="text-3xl" role="img" aria-hidden="true">🏁</span>
+                        <div className="font-display text-sm font-bold tracking-widest uppercase"
+                          style={{ color: 'var(--pw-text-strong)' }}>
+                          Lap one
+                        </div>
+                        <div className="font-mono text-[11px] max-w-xs leading-relaxed"
+                          style={{ color: 'var(--pw-dim)' }}>
+                          Nobody has completed a lap yet, so there is nothing on the timing
+                          screen. It fills as the cars cross the line.
+                        </div>
+                      </div>
                     ) : (
                       <div className="flex flex-col items-center justify-center h-full gap-2">
                         <TowerEmptyState weekendState={weekendState} />

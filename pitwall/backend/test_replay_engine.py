@@ -94,6 +94,31 @@ def test_driver_list_and_session_metadata():
     assert session["phase"] == "LIVE"
 
 
+def test_loading_clears_whatever_was_on_screen():
+    """
+    A replay starting at t=0 must state that nothing has happened yet.
+
+    A fresh socket is served the backend's session cache on connect — the last
+    live state it saw, which out of season is a finished race. The opening
+    seconds of a replayed race carry no timing events, because nobody has
+    completed a lap, so an empty payload has to be SENT rather than omitted.
+    Omitting it left a finished race's field sitting under the new session's
+    header, reading "LAP 62 / 53".
+    """
+    lib, rec = _library(), Recorder()
+    asyncio.run(ReplaySession(lib, rec).load(SLUG, "race", at=0))
+
+    timing = rec.last("timing")
+    assert timing is not None, "no timing envelope sent at t=0"
+    assert timing["data"]["drivers"] == []
+    assert rec.last("tyres")["data"]["drivers"] == []
+
+    # And the client is told a replay is starting BEFORE any of it arrives, so
+    # it can clear first.
+    kinds = [e["type"] for e in rec.sent]
+    assert kinds.index("replay_state") < kinds.index("timing"), kinds[:6]
+
+
 # ── 2. reconstruction ─────────────────────────────────────────────────────────
 
 def test_seek_reconstructs_rather_than_replaying():

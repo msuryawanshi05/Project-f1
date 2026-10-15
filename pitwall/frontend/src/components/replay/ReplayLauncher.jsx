@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import useF1Store from '../../store/useF1Store'
 import { useReplayCatalogue, useReplayControls } from '../../hooks/useReplay'
 
 /**
@@ -11,7 +12,7 @@ import { useReplayCatalogue, useReplayControls } from '../../hooks/useReplay'
  */
 export default function ReplayLauncher({ compact = false }) {
   const catalogue = useReplayCatalogue()
-  const { load, play, ready } = useReplayControls()
+  const { load, play, seek, ready } = useReplayControls()
   const [starting, setStarting] = useState(null)
 
   if (catalogue.loading || !catalogue.available) return null
@@ -25,10 +26,19 @@ export default function ReplayLauncher({ compact = false }) {
   const start = (session) => {
     if (!ready) return
     setStarting(session.label)
+    // Load at zero, then jump to just before the first car completes a lap.
+    //
+    // At lights out there is nothing on a timing screen — nobody has set a
+    // time — and at Monza the first lap takes 95 seconds. Opening on an empty
+    // tower is accurate and a terrible first impression. The scrubber still
+    // reaches zero for anyone who wants the start.
     load(weekend.slug, session.label.toLowerCase(), 0)
-    // The load is asynchronous on the backend; a short delay lets the state
-    // land before play, rather than racing it.
-    setTimeout(() => { play(); setStarting(null) }, 250)
+    setTimeout(() => {
+      const ft = useF1Store.getState().replay.firstTiming ?? 0
+      if (ft > 10) seek(Math.max(0, ft - 8))
+      play()
+      setStarting(null)
+    }, 350)
   }
 
   if (compact) {

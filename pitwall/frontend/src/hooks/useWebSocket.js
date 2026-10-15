@@ -264,9 +264,24 @@ function hasRecentStartProcedure(messages) {
         if ('session_label' in data) patch.sessionLabel = data.session_label
         if ('kind' in data) patch.kind = data.kind
         if ('total_laps' in data) patch.totalLaps = data.total_laps
-        // Leaving replay returns the tab to whatever the live feed is doing, so
-        // the retained timing from the replay must go with it.
-        if (data.active === false) resetLiveSession()
+        if ('first_timing' in data) patch.firstTiming = data.first_timing
+        // Entering a replay, or switching session inside one, clears whatever
+        // was on screen first.
+        //
+        // A fresh socket is served the backend's session cache on connect — the
+        // last live state it saw. The opening seconds of a replayed race carry
+        // no timing events, so nothing overwrote that, and the tower showed a
+        // finished race's field under the new session's header: "LAP 62 / 53".
+        const prev = useF1Store.getState().replay
+        const changed = data.active && (!prev.active || data.session !== prev.session)
+        // Leaving replay returns the tab to the live feed, so the retained
+        // replay timing must go with it.
+        if (changed || data.active === false) {
+          resetLiveSession()
+          setSession({
+            name: '', status: '', lap: null, total_laps: null, clock: '', phase: 'PRE',
+          })
+        }
         setReplay(patch)
         break
       }

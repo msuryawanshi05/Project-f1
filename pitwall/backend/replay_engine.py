@@ -220,10 +220,11 @@ class _SessionState:
             }),
             _env("track_status", self.track_status),
         ]
-        if self.timing:
-            out.append(_env("timing", self.timing_payload()))
-        if self.tyres:
-            out.append(_env("tyres", self.tyres_payload()))
+        # Always sent, even empty: at t=0 nothing has happened yet, and an
+        # empty tower is the honest rendering of that. Omitting them leaves
+        # whatever the socket was showing before.
+        out.append(_env("timing", self.timing_payload()))
+        out.append(_env("tyres", self.tyres_payload()))
         if self.weather:
             out.append(_env("weather", self.weather))
         if self.lap_count:
@@ -286,6 +287,16 @@ class ReplaySession:
         self.duration = float(stream.get("duration_s") or 0.0)
         self.speed = 1
         self.playing = False
+
+        # Announce BEFORE the first state goes out.
+        #
+        # A fresh socket is served the backend's session cache on connect — the
+        # last live state it saw, which out of season is a finished race. The
+        # first seconds of a replayed race contain no timing events (nobody has
+        # completed a lap yet), so nothing overwrote it and the tower sat there
+        # showing lap 62 of a 53-lap race. The client clears on this message,
+        # so it has to arrive first.
+        await self._announce()
         await self.seek(at, announce=False)
         await self._announce()
         return True
@@ -482,9 +493,26 @@ class ReplaySession:
             base = base.replace(tzinfo=timezone.utc)
         return (base + timedelta(seconds=self.position)).isoformat()
 
+    def first_timing(self) -> float:
+        """
+        When the first car completes a lap.
+
+        Nothing is on the timing screen before this — at lights out nobody has
+        set a time yet — so it is where a viewer wants to start, and it is
+        computed here rather than baked into the file because the stream is
+        already in memory.
+        """
+        if not self.stream:
+            return 0.0
+        for ev in self.stream["events"]:
+            if ev["type"] == "timing":
+                return float(ev["t"])
+        return 0.0
+
     def status(self) -> dict:
         man = self.library.manifest(self.slug) if self.slug else None
         return {
+            "first_timing": round(self.first_timing(), 2),
             "active": bool(self.stream),
             "weekend": self.slug,
             "weekend_name": (man or {}).get("name"),
