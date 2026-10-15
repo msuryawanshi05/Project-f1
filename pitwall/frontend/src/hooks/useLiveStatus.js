@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+import { apiBase } from '../utils/apiBase'
 
 /**
  * Whether live timing is available on THIS deployment.
@@ -26,7 +26,7 @@ export function useLiveStatus({ pollMs = 60000 } = {}) {
 
     const check = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/live-status`, { signal: ctrl.signal })
+        const res = await fetch(`${apiBase()}/api/live-status`, { signal: ctrl.signal })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const json = await res.json()
         if (!cancelled) {

@@ -1,4 +1,5 @@
 import useF1Store from '../store/useF1Store'
+import LocalBackendSetting from '../components/settings/LocalBackendSetting'
 import teamsData from '../data/teams.json'
 
 const ALL_DRIVERS = Object.entries(teamsData.driverTeams).map(([num, team]) => ({
@@ -82,6 +83,8 @@ export default function Settings() {
           </button>
         </section>
 
+        <LocalBackendSetting />
+
         {/* Sync Delay */}
         <section className="px-6 py-6">
           <div className="flex items-center justify-between mb-3">
@@ -90,20 +93,26 @@ export default function Settings() {
               <div className="font-mono text-xs text-pitwall-ghost mt-0.5">
                 Delay data to match TV broadcast
               </div>
+              <div className="font-mono text-xs text-pitwall-ghost mt-0.5">
+                Or press [ and ] on the Live tab, without leaving the tower.
+              </div>
             </div>
             <div className="font-mono text-sm text-pitwall-text">
               {settings.syncDelaySeconds === 0
                 ? 'No delay'
-                : `+${settings.syncDelaySeconds}s`}
+                : `+${settings.syncDelaySeconds.toFixed(1)}s`}
             </div>
           </div>
           <input
             type="range"
             min={0}
             max={30}
-            step={1}
+            /* Half-second steps, matching the [ and ] keys on the Live tab.
+               A slider that moves in whole seconds and keys that move in
+               halves would disagree about the same stored value. */
+            step={0.5}
             value={settings.syncDelaySeconds}
-            onChange={(e) => updateSettings({ syncDelaySeconds: parseInt(e.target.value, 10) })}
+            onChange={(e) => updateSettings({ syncDelaySeconds: parseFloat(e.target.value) })}
             className="w-full accent-status-red"
           />
           <div className="flex justify-between font-mono text-[10px] text-pitwall-ghost mt-1">

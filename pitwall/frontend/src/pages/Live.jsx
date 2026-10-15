@@ -26,6 +26,9 @@ import { buildStartingGrid } from '../utils/startingGrid'
 import ReplayBar from '../components/replay/ReplayBar'
 import ReplayLauncher from '../components/replay/ReplayLauncher'
 import { useReplayCatalogue } from '../hooks/useReplay'
+import BattleRadar from '../components/live/BattleRadar'
+import UndercutWatch from '../components/live/UndercutWatch'
+import { SyncChip, WakeLockChip } from '../components/live/LiveStatusChips'
 import QualifyingGridTower from '../components/ui/QualifyingGridTower'
 
 // ── Countdown inline ──────────────────────────────────────────────────────────
@@ -610,6 +613,9 @@ export default function Live() {
   const [showSidebar, setShowSidebar]       = useState(true)
   const splitRef = useRef(null)
   const [preRaceView, setPreRaceView]       = useState('GRID') // 'GRID' | 'COUNTDOWN'
+  // Not persisted: pinning favourites is a thing you do for one stint of one
+  // race, not a standing preference. It resets on reload by design.
+  const [focusFavourites, setFocusFavourites] = useState(false)
 
   // Expose setActiveTab to window so keyboard shortcuts can switch tabs
   useEffect(() => {
@@ -711,6 +717,33 @@ export default function Live() {
       return ba - bb
     })
   }, [timing, session.name])
+
+  /**
+   * Favourites pinned to the top, the rest of the field below in order.
+   *
+   * The pinned rows keep their real position numbers — a pinned P14 still
+   * reads P14 — and a labelled divider separates the two groups, because the
+   * one thing this must never do is let a glance mistake a pinned row for the
+   * race leader.
+   */
+  const favouriteNumbers = useMemo(
+    () => new Set((settings.favouriteDrivers ?? []).map(String)),
+    [settings.favouriteDrivers],
+  )
+  const focusActive = focusFavourites && favouriteNumbers.size > 0
+  const displayTiming = useMemo(() => {
+    if (!focusActive) return sortedTiming
+    const pinned = []
+    const rest = []
+    for (const t of sortedTiming) {
+      const num = String(t.driver_number ?? t.number)
+      ;(favouriteNumbers.has(num) ? pinned : rest).push(t)
+    }
+    return [...pinned, ...rest]
+  }, [sortedTiming, favouriteNumbers, focusActive])
+  const pinnedCount = focusActive
+    ? sortedTiming.filter((t) => favouriteNumbers.has(String(t.driver_number ?? t.number))).length
+    : 0
 
   // tyresByDriver: merge SignalR tyre data with OpenF1 stint data
   const tyresByDriver = useMemo(() => {
@@ -1013,7 +1046,12 @@ export default function Live() {
             )}
           </button>
         ))}
-        <div className="ml-auto flex items-center gap-3 px-4">
+        <div className="ml-auto flex items-center gap-2 px-4">
+          {/* Always visible: the sync offset the [ and ] keys change, and
+              whether the screen is being held awake. Both answer questions
+              asked at unpredictable moments mid-race. */}
+          <SyncChip />
+          <WakeLockChip active={isSessionActive || replay.active} />
           {/* OpenF1 reachability — live probe, not a hardcoded value */}
           <div
             className="flex items-center gap-1"
@@ -1120,6 +1158,25 @@ export default function Live() {
                     </button>
                   </div>
                 )}
+                {/* Favourite focus. Only offered when there are favourites to
+                    pin and a tower to pin them in. */}
+                {isSessionActive && (settings.favouriteDrivers?.length ?? 0) > 0 && (
+                  <button
+                    onClick={() => setFocusFavourites((v) => !v)}
+                    aria-pressed={focusActive}
+                    title={focusActive
+                      ? 'Showing favourites pinned above the field'
+                      : 'Pin your favourite drivers to the top of the tower'}
+                    className="font-display text-[9px] tracking-widest px-2.5 py-1 border rounded-sm transition-all uppercase font-bold active:scale-95 select-none"
+                    style={{
+                      borderColor: focusActive ? 'var(--pw-text-strong)' : 'var(--pw-border)',
+                      color: focusActive ? 'var(--pw-text-strong)' : 'var(--pw-ghost)',
+                      background: focusActive ? 'var(--pw-surface-2)' : 'transparent',
+                    }}
+                  >
+                    ★ FOCUS{focusActive ? ` (${pinnedCount})` : ''}
+                  </button>
+                )}
                 <button
                   onClick={() => setShowSidebar(!showSidebar)}
                   className="font-display text-[9px] tracking-widest px-2.5 py-1 border border-pitwall-border hover:border-pitwall-muted text-pitwall-ghost hover:text-pitwall-dim rounded-sm transition-all uppercase font-bold bg-white/5 active:scale-95 select-none"
@@ -1215,7 +1272,7 @@ export default function Live() {
                       </div>
                     )
                   ) : (
-                    sortedTiming.map((t, index) => {
+                    displayTiming.map((t, index) => {
                       const driverNum  = t?.driver_number ?? t?.number
                       const driver     = driversByNumber[driverNum] ?? { number: driverNum }
                       const tyre       = tyresByDriver[driverNum]
@@ -1224,16 +1281,40 @@ export default function Live() {
                       const isFav      = settings.favouriteDrivers?.includes(String(driverNum))
                       const penalty    = penaltiesByDriver[String(driverNum)]
 
-                      const prevT = index > 0 ? sortedTiming[index - 1] : null
+                      // "The car ahead" is the one ahead ON TRACK, which is
+                      // not the row above once favourites are pinned to the
+                      // top. Both of these are therefore keyed off the real
+                      // classification, never the display order.
+                      const trackIndex = sortedTiming.indexOf(t)
+                      const prevT = trackIndex > 0 ? sortedTiming[trackIndex - 1] : null
                       const currentGapSecs = parseGapToSeconds(t?.gap_to_leader ?? t?.gap)
                       const aheadGapSecs = prevT ? parseGapToSeconds(prevT.gap_to_leader ?? prevT.gap) : 0
                       const gapToAhead = currentGapSecs != null && aheadGapSecs != null ? currentGapSecs - aheadGapSecs : null
-                      const isBattling = index > 0 && gapToAhead != null && gapToAhead < 1.0
+                      const isBattling = trackIndex > 0 && gapToAhead != null && gapToAhead < 1.0
 
-                      const showCutLine = cutIndex != null && index === cutIndex
+                      // The knockout line marks a position in the qualifying
+                      // order, so it is suppressed entirely while the rows are
+                      // reordered — drawn at a display index it would claim the
+                      // wrong drivers were being eliminated.
+                      const showCutLine = !focusActive && cutIndex != null && index === cutIndex
 
                       return (
                         <div key={driverNum ?? index}>
+                          {focusActive && index === pinnedCount && pinnedCount > 0 && (
+                            <div
+                              className="flex items-center gap-2 px-4 py-1 select-none"
+                              style={{ background: 'var(--pw-surface-2)',
+                                borderTop: '1px solid var(--pw-border)',
+                                borderBottom: '1px solid var(--pw-border)' }}
+                            >
+                              <div className="flex-1 h-px" style={{ background: 'var(--pw-border)' }} />
+                              <span className="font-mono text-[9px] tracking-widest uppercase"
+                                style={{ color: 'var(--pw-ghost)' }}>
+                                Rest of the field · running order
+                              </span>
+                              <div className="flex-1 h-px" style={{ background: 'var(--pw-border)' }} />
+                            </div>
+                          )}
                           <DriverRow
                             driver={driver}
                             timing={t}
@@ -1329,6 +1410,10 @@ export default function Live() {
                       ) : (
                         <div className="font-mono text-xs text-pitwall-ghost">Weather data not available</div>
                       )}
+
+                      {/* Where to look when the director is on the wrong car */}
+                      <BattleRadar />
+                      <UndercutWatch />
 
                       {/* Race Control Messages */}
                       <div className="border-t border-pitwall-border/40 pt-3">

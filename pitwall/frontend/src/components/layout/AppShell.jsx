@@ -9,6 +9,7 @@ import useNotificationTriggers from '../../hooks/useNotificationTriggers'
 import useRaceWeekendState from '../../hooks/useRaceWeekendState'
 import useLiveStatus from '../../hooks/useLiveStatus'
 import ReplayLauncher from '../replay/ReplayLauncher'
+import useBackendOrigin from '../../hooks/useBackendOrigin'
 import DataMonitor from '../dev/DataMonitor'
 import BroadcastBanner from '../ui/BroadcastBanner'
 
@@ -101,6 +102,14 @@ export default function AppShell({ children, wsConnected, connectionState = 'con
   // last value after the flag. Use the resolved lifecycle so a finished session
   // is not advertised as live.
   const { pathname } = useLocation()
+  // Resolved once, here, and published to the store so every hook and the
+  // WebSocket agree about which backend they are talking to.
+  const backend = useBackendOrigin()
+  const setBackend = useF1Store((s) => s.setBackend)
+  useEffect(() => {
+    setBackend({ api: backend.api, ws: backend.ws, local: backend.local })
+  }, [backend.api, backend.ws, backend.local, setBackend])
+
   const replay = useF1Store((s) => s.replay)
   const qualifying = useF1Store((s) => s.qualifying)
   const liveStatus = useLiveStatus()
@@ -216,15 +225,28 @@ export default function AppShell({ children, wsConnected, connectionState = 'con
             // this chip exists to prevent.
             const label = replay.active
               ? 'REPLAY'
+              : backend.local && wsConnected
+              ? 'LOCAL'
+              : backend.degraded && wsConnected
+              ? 'DEPLOYED'
               : wsConnected
               ? (feedBlocked ? 'NO FEED' : 'CONNECTED')
               : (waking ? 'WAKING…' : 'CONNECTING…')
-            const dot = replay.active
+            const dot = backend.local && wsConnected
+              ? 'bg-status-green'
+              : backend.degraded && wsConnected
+              ? 'bg-status-yellow'
+              : replay.active
               ? 'bg-status-red'
               : wsConnected
               ? (feedBlocked ? 'bg-status-yellow' : 'bg-status-green')
               : 'bg-pitwall-ghost animate-pulse'
-            const title = replay.active
+            const localTitle = backend.local
+              ? `Connected to a PITWALL backend on this machine (${backend.api}). Live timing is available.`
+              : backend.degraded
+              ? `The local backend could not be reached, so this page is on the deployed one. ${backend.message ?? ''}`
+              : null
+            const title = localTitle ? localTitle : replay.active
               ? `Replaying ${replay.weekendName ?? 'a recorded weekend'} — ${replay.sessionLabel ?? ''}. This is not live timing.`
               : wsConnected
               ? (feedBlocked

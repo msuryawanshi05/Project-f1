@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, memo } from 'react'
+import { apiBase } from '../../utils/apiBase'
 import { motion } from 'framer-motion'
 import useF1Store from '../../store/useF1Store'
 import { getTeamColour, degreesToCompass } from '../../utils/driverUtils'
@@ -279,8 +280,8 @@ export default function RadioTab() {
   const fetchRealRadio = useCallback(async () => {
     if (!isLive || !sessionKey) return []
     try {
-      const PROXY = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000') + '/api/openf1'
-      const res = await fetch(`${PROXY}/v1/team_radio?session_key=${sessionKey}`)
+      const PROXY = () => `${apiBase()}/api/openf1`
+      const res = await fetch(`${PROXY()}/v1/team_radio?session_key=${sessionKey}`)
       if (!res.ok) return []
       const data = await res.json()
       if (Array.isArray(data)) {

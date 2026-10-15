@@ -13,6 +13,7 @@ const defaultSettings = {
   favouriteDrivers: [],
   soundEnabled: true,
   syncDelaySeconds: 0,
+  useLocalBackend: false,
   darkMode: true,
   density: 'comfortable',
   teamAccent: '#E10600',
@@ -70,6 +71,18 @@ const useF1Store = create((set, get) => ({
   // Set by useWebSocket once the socket is open. Components call it rather than
   // holding a socket reference of their own.
   sendCommand: null,
+
+  // ── Backend origin ────────────────────────────────────────────────────────
+  // Which backend this page is talking to. Normally the deployed one; on a
+  // race weekend it can be a backend on the viewer's own machine, which is the
+  // only way to get live timing (F1 returns 403 to datacenter IPs). Resolved
+  // once by useBackendOrigin and read by every hook, so they cannot disagree
+  // about where the API is.
+  backend: {
+    api: import.meta.env.VITE_API_URL ?? 'http://localhost:8000',
+    ws: import.meta.env.VITE_WS_URL ?? 'ws://localhost:8000/ws',
+    local: false,
+  },
 
   // ── Strategy chart gap history ──────────────────────────────────────────────
   gapHistory: [],     // [{ lap, gap_<number>: seconds, ... }] — last 100 laps
@@ -143,10 +156,32 @@ const useF1Store = create((set, get) => ({
 
   setTiming: (timing) => set({ timing }),
 
+  /**
+   * Move the broadcast sync delay by a step.
+   *
+   * Broadcast delay drifts through a race and differs per stream, so this has
+   * to be adjustable without leaving the tower — walking to Settings mid-race
+   * is enough friction that the feature went unused. Writes to the same
+   * setting the Settings slider reads, so the two can never disagree.
+   */
+  nudgeSyncDelay: (step) => {
+    const cur = get().settings.syncDelaySeconds ?? 0
+    // Clamped to the slider's own range, and rounded to avoid floating point
+    // dust accumulating into "3.0000000000000004s".
+    const next = Math.round(Math.min(30, Math.max(0, cur + step)) * 2) / 2
+    get().updateSettings({ syncDelaySeconds: next })
+    return next
+  },
+
   setReplay: (patch) =>
     set((state) => ({ replay: { ...state.replay, ...patch } })),
 
   setSendCommand: (fn) => set({ sendCommand: fn }),
+
+  setBackend: (backend) =>
+    set((state) => (state.backend.api === backend.api && state.backend.ws === backend.ws
+      ? state                      // no-op, so the socket is not torn down
+      : { backend: { ...state.backend, ...backend } })),
 
   setTyres: (tyres) => set({ tyres }),
 

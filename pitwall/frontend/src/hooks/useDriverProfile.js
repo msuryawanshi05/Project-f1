@@ -18,8 +18,8 @@ import { useEffect, useState } from 'react'
  */
 
 const JOLPICA = 'https://api.jolpi.ca/ergast/f1'
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
-const OPENF1_PROXY = `${API_BASE}/api/openf1`
+import { apiBase } from '../utils/apiBase'
+const OPENF1_PROXY = `${apiBase()}/api/openf1`
 const CACHE_TTL = 6 * 60 * 60 * 1000 // 6h — career stats change at most weekly
 const SEASON = new Date().getFullYear()
 
@@ -247,7 +247,7 @@ export function useDriverProfile(driverId) {
     const ctrl = new AbortController()
     let cancelled = false
 
-    fetch(`${API_BASE}/api/driver/${encodeURIComponent(driverId)}/career`, { signal: ctrl.signal })
+    fetch(`${apiBase()}/api/driver/${encodeURIComponent(driverId)}/career`, { signal: ctrl.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()
@@ -461,7 +461,7 @@ export function useConstructorProfile(constructorId) {
 
     const ctrl = new AbortController()
     let cancelled = false
-    fetch(`${API_BASE}/api/constructor/${encodeURIComponent(constructorId)}/career`, { signal: ctrl.signal })
+    fetch(`${apiBase()}/api/constructor/${encodeURIComponent(constructorId)}/career`, { signal: ctrl.signal })
       .then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json() })
       .then((json) => {
         if (cancelled) return

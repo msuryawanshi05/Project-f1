@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import useF1Store from '../store/useF1Store'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+import { apiBase } from '../utils/apiBase'
 
 /**
  * What this deployment can replay, and how to drive it.
@@ -21,7 +21,7 @@ export function useReplayCatalogue() {
   useEffect(() => {
     let cancelled = false
     const ctrl = new AbortController()
-    fetch(`${API_BASE}/api/replay`, { signal: ctrl.signal })
+    fetch(`${apiBase()}/api/replay`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((j) => {
         if (!cancelled) setCatalogue({ loading: false, available: Boolean(j.available), weekends: j.weekends ?? [] })
@@ -73,7 +73,7 @@ export function useReplayMarkers(weekend, session) {
     if (!weekend || !session) { setMarkers([]); return }
     let cancelled = false
     const ctrl = new AbortController()
-    fetch(`${API_BASE}/api/replay/${weekend}/${session}/markers`, { signal: ctrl.signal })
+    fetch(`${apiBase()}/api/replay/${weekend}/${session}/markers`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((j) => { if (!cancelled) setMarkers(j.markers ?? []) })
       .catch(() => { if (!cancelled) setMarkers([]) })
@@ -104,7 +104,7 @@ export function useReplayTelemetry(weekend, session, driverNumber) {
     let cancelled = false
     const ctrl = new AbortController()
     setLoading(true)
-    fetch(`${API_BASE}/api/replay/${weekend}/${session}/telemetry/${driverNumber}`,
+    fetch(`${apiBase()}/api/replay/${weekend}/${session}/telemetry/${driverNumber}`,
       { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((j) => {
@@ -131,7 +131,7 @@ export function useReplayFastestLaps(weekend, session) {
 
     let cancelled = false
     const ctrl = new AbortController()
-    fetch(`${API_BASE}/api/replay/${weekend}/${session}/fastest-laps`, { signal: ctrl.signal })
+    fetch(`${apiBase()}/api/replay/${weekend}/${session}/fastest-laps`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((j) => { fastestCache.set(key, j); if (!cancelled) setData(j) })
       .catch(() => { if (!cancelled) setData(null) })

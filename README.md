@@ -174,9 +174,42 @@ makes a replay a working test of the live path rather than a mock of it.
 
 ---
 
+## Watching a race
+
+One command. Works from a cold start — it creates the virtual environment,
+installs what is missing, builds the frontend and serves it from the backend on
+a single origin.
+
+```powershell
+cd pitwall
+.\race-day.ps1
+```
+
+It prints the URL to open and when the next session starts, then runs until you
+stop it. Flags: `-Port`, `-NoBrowser`, and `-SkipBuild` for restarting within a
+session.
+
+**This is the only way to get live timing.** F1's feed answers 403 to
+datacenter IP ranges, so [the deployed site](https://project-f1.antideploy.app)
+can never stream a session — it serves the [replay](#replay) instead. Your own
+machine is not blocked.
+
+It serves the **production bundle**, not the dev server, and that is
+deliberate: several bugs in this project appeared only in the built bundle
+served single-origin, so watching a race on the dev server would mean watching
+something subtly different from what was tested.
+
+While a session is running the Live tab also keeps the screen awake, and `[`
+and `]` nudge the broadcast sync delay by half a second without leaving the
+tower — the offset is shown in the header. The wake lock lasts exactly as long
+as the session, so there is nothing to set beforehand and nothing to put back
+afterwards.
+
+---
+
 ## Running locally
 
-Requires Node 18+ and Python 3.11+.
+For development. Requires Node 18+ and Python 3.11+.
 
 ```bash
 git clone https://github.com/msuryawanshi05/Project-f1.git

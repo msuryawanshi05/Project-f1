@@ -10,6 +10,7 @@ export function useKeyboardShortcuts() {
   const navigate = useNavigate()
   const settings = useF1Store((s) => s.settings)
   const updateSettings = useF1Store((s) => s.updateSettings)
+  const nudgeSyncDelay = useF1Store((s) => s.nudgeSyncDelay)
 
   const handler = useCallback((e) => {
     // Ignore shortcuts when user is typing in a form element
@@ -55,6 +56,21 @@ export function useKeyboardShortcuts() {
         updateSettings({ soundEnabled: !settings.soundEnabled })
         break
 
+      // ── Sync delay ───────────────────────────────────────────────────────────
+      // Live tab only. Broadcast delay drifts through a race and differs per
+      // stream, and walking to Settings mid-race is enough friction that the
+      // slider went unused. Restricted to /live because nudging an invisible
+      // setting from the standings page would be a change nobody sees.
+      case '[':
+      case ']': {
+        if (window.location.pathname === '/live') {
+          e.preventDefault()
+          const next = nudgeSyncDelay(e.key === ']' ? 0.5 : -0.5)
+          window.__pitwall_syncToast?.(next)
+        }
+        break
+      }
+
       // ── UI ───────────────────────────────────────────────────────────────────
       case 'Escape':
         window.__pitwall_closePanel?.()
@@ -70,7 +86,7 @@ export function useKeyboardShortcuts() {
       default:
         break
     }
-  }, [navigate, settings, updateSettings])
+  }, [navigate, settings, updateSettings, nudgeSyncDelay])
 
   useEffect(() => {
     window.addEventListener('keydown', handler)

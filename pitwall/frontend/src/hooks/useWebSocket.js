@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import useF1Store from '../store/useF1Store'
+import { apiBase, wsUrl } from '../utils/apiBase'
 
-const WS_URL              = import.meta.env.VITE_WS_URL  ?? 'ws://localhost:8000/ws'
-const API_BASE            = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+// The backend origin is resolved at runtime and can change mid-session when
+// the local-backend toggle flips, so it is read from the store rather than
+// captured at import time.
 // Reconnect backoff.
 //
 // A fixed 3s retry is wrong for a free-tier host: Render spins containers down
@@ -306,7 +308,7 @@ function hasRecentStartProcedure(messages) {
   // the live session name changes, not just once on connect.
   async function fetchCurrentSession() {
     try {
-      const res = await fetch(`${API_BASE}/api/current-session`)
+      const res = await fetch(`${apiBase()}/api/current-session`)
       if (!res.ok) return
       const json = await res.json()
       if (json.session_key != null) setCurrentSessionKey(json.session_key)
@@ -326,7 +328,7 @@ function hasRecentStartProcedure(messages) {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return
 
     setConnectionState((prev) => (prev === 'connected' ? prev : 'connecting'))
-    const ws = new WebSocket(WS_URL)
+    const ws = new WebSocket(wsUrl())
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -412,7 +414,17 @@ function hasRecentStartProcedure(messages) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // The backend origin, as a dependency. Flipping the local-backend toggle has
+  // to tear the socket down and open a new one — an existing socket to the
+  // deployed backend keeps working perfectly while serving the wrong data.
+  const backendWs = useF1Store((s) => s.backend.ws)
+
   useEffect(() => {
+    // Close any socket to the previous origin before opening the new one.
+    if (wsRef.current) {
+      try { wsRef.current.close() } catch { /* already closing */ }
+      wsRef.current = null
+    }
     connect()
 
     // ── Visibility change: reconnect immediately when tab regains focus ──────
@@ -436,7 +448,7 @@ function hasRecentStartProcedure(messages) {
       if (wsRef.current) wsRef.current.close()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [backendWs])
 
   return { connected, connectionState, attempts }
 }

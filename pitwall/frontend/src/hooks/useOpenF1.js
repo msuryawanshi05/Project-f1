@@ -18,12 +18,13 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { apiBase } from '../utils/apiBase'
 
-const PROXY = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000') + '/api/openf1'
+const PROXY = () => `${apiBase()}/api/openf1`
 
 // ── Generic fetch via proxy ───────────────────────────────────────────────────
 async function openf1Get(path, params = {}) {
-  const url = new URL(`${PROXY}/${path}`)
+  const url = new URL(`${PROXY()}/${path}`)
   Object.entries(params).forEach(([k, v]) => {
     if (v != null) url.searchParams.set(k, v)
   })
@@ -40,7 +41,7 @@ export function useOpenF1Status() {
 
   useEffect(() => {
     let cancelled = false
-    const base = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+    const base = apiBase()
     fetch(`${base}/api/openf1/status`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {

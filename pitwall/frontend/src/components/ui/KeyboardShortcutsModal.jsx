@@ -22,6 +22,8 @@ const SHORTCUTS = [
       { key: 'S', label: 'Strategy — Stint & gap charts' },
       { key: 'E', label: 'Telemetry — Car data' },
       { key: 'R', label: 'Radio — Team transmissions' },
+      { key: '[', label: 'Sync delay −0.5s (match your TV feed)' },
+      { key: ']', label: 'Sync delay +0.5s' },
     ],
   },
   {
