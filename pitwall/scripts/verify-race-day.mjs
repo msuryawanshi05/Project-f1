@@ -100,19 +100,11 @@ async function scrubTo(page, fraction) {
     const now = await landed()
     if (now != null) return now
   }
-  // A real mouse click occasionally misses after the panel re-renders mid-race.
-  // The handler reads clientX, so dispatching on the element itself exercises
-  // the same code without depending on hit-testing.
-  await bar.evaluate((el, f) => {
-    const r = el.getBoundingClientRect()
-    el.dispatchEvent(new MouseEvent('click', {
-      bubbles: true, clientX: r.left + r.width * f, clientY: r.top + r.height / 2,
-    }))
-  }, fraction)
-  await wait(1400)
-  const now = await landed()
-  if (now == null) throw new Error(`scrub did not reach ${Math.round(target)}s`)
-  return now
+  // Deliberately no synthetic-click fallback. The misses this used to work
+  // around were notification toasts swallowing the click (they carried
+  // pointer-events-auto over the whole card); dispatching the event directly
+  // would hide a regression of exactly that kind.
+  throw new Error(`scrub did not reach ${Math.round(target)}s`)
 }
 
 async function panelText(page, heading) {

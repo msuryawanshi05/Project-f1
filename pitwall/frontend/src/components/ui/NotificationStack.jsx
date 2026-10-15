@@ -78,7 +78,7 @@ const NotificationCard = memo(function NotificationCard({ notification, onDismis
         {/* Dismiss button */}
         <button
           onClick={() => onDismiss(notification.id)}
-          className="absolute top-1.5 right-2 text-pitwall-ghost hover:text-pitwall-dim font-mono text-xs leading-none transition-colors"
+          className="pointer-events-auto absolute top-1.5 right-2 text-pitwall-ghost hover:text-pitwall-dim font-mono text-xs leading-none transition-colors"
           aria-label={`Dismiss ${notification.title} notification`}
         >
           ✕
@@ -137,7 +137,6 @@ export default function NotificationStack() {
       {visible.map((n) => (
         <div
           key={n.id}
-          className="pointer-events-auto"
           style={{ animation: 'nSlideIn 0.18s ease forwards' }}
         >
           <NotificationCard notification={n} onDismiss={dismissNotification} />

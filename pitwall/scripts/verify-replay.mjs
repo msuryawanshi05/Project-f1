@@ -102,6 +102,11 @@ async function newPage(browser, { dark = true } = {}) {
   // The transport only works once the socket is up and has published its sender.
   await until(page, () => Boolean(globalThis.__pitwall_store.getState().sendCommand),
     { label: 'websocket' })
+  // The weekend state machine cannot resolve without a calendar to resolve
+  // against, and Jolpica takes about a second. Asserting before it lands reads
+  // every phase as NONE.
+  await until(page, () => globalThis.__pitwall_store.getState().calendar.length > 0,
+    { label: 'calendar' })
   return { ctx, page }
 }
 
