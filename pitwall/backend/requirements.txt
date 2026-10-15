@@ -12,4 +12,5 @@ apscheduler
 python-dotenv
 aiosqlite
 httpx
+requests
 signalrcore
